@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="Qwen-TTS-WS-HTTP" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="Qwen-TTS-WS-HTTP" project-jdk-type="Python SDK" />
+</project>
