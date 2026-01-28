@@ -9,7 +9,7 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from config import settings
+from config import settings, logger
 from models import TTSRequest
 from callbacks import HttpCallback, SSECallback
 from utils import init_dashscope_api_key, pcm_to_wav, save_audio
@@ -35,6 +35,7 @@ init_dashscope_api_key()
 
 @app.post("/tts")
 async def text_to_speech(request: TTSRequest, http_request: Request):
+    logger.info(f"Received TTS request: voice={request.voice}, model={request.model}")
     callback = HttpCallback()
 
     # Initialize QwenTtsRealtime for each request to ensure isolation
@@ -45,7 +46,9 @@ async def text_to_speech(request: TTSRequest, http_request: Request):
     )
 
     try:
+        logger.debug("Connecting to DashScope...")
         qwen_tts_realtime.connect()
+        logger.debug(f"Updating session: voice={request.voice}")
         qwen_tts_realtime.update_session(
             voice=request.voice,
             response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
@@ -53,24 +56,33 @@ async def text_to_speech(request: TTSRequest, http_request: Request):
             format='pcm',
         )
 
+        logger.debug(f"Appending text: {request.text[:50]}...")
         qwen_tts_realtime.append_text(request.text)
         qwen_tts_realtime.finish()
 
         # Wait for the generation to complete
+        logger.debug("Waiting for TTS synthesis to finish...")
         if not callback.wait_for_finished(timeout=60):
+            logger.error("TTS synthesis timed out")
             raise HTTPException(status_code=504, detail="TTS synthesis timed out")
 
         if callback.error_msg:
+            logger.error(f"TTS synthesis error: {callback.error_msg}")
             raise HTTPException(status_code=500, detail=f"TTS synthesis error: {callback.error_msg}")
 
         audio_data = callback.get_audio_data()
 
         if not audio_data:
+            logger.error("No audio data generated")
             raise HTTPException(status_code=500, detail="No audio data generated")
 
+        session_id = qwen_tts_realtime.get_session_id()
+        first_audio_delay = qwen_tts_realtime.get_first_audio_delay()
+        logger.info(f"TTS synthesis completed: session_id={session_id}, first_audio_delay={first_audio_delay}ms, audio_size={len(audio_data)} bytes")
+
         headers = {
-            "X-Session-Id": qwen_tts_realtime.get_session_id() or "",
-            "X-First-Audio-Delay": str(qwen_tts_realtime.get_first_audio_delay() or 0)
+            "X-Session-Id": session_id or "",
+            "X-First-Audio-Delay": str(first_audio_delay or 0)
         }
 
         # Encapsulate PCM data into WAV format
@@ -78,16 +90,20 @@ async def text_to_speech(request: TTSRequest, http_request: Request):
 
         file_url = None
         if ENABLE_SAVE:
+            logger.debug("Saving audio file...")
             file_url = save_audio(wav_audio_data, OUTPUT_DIR, http_request.base_url)
+            logger.info(f"Audio saved: {file_url}")
 
         if request.return_url:
             if not ENABLE_SAVE:
+                logger.warning("Saving is disabled, but return_url requested")
                 raise HTTPException(status_code=400, detail="Saving is disabled, cannot return URL")
             return Response(content=json.dumps({"url": file_url}), media_type="application/json", headers=headers)
 
         return Response(content=wav_audio_data, media_type="audio/wav", headers=headers)
 
     except Exception as e:
+        logger.exception(f"Unexpected error in /tts: {str(e)}")
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
@@ -99,6 +115,7 @@ async def text_to_speech(request: TTSRequest, http_request: Request):
 
 @app.post("/tts_stream")
 async def text_to_speech_stream(request: TTSRequest, http_request: Request):
+    logger.info(f"Received TTS stream request: voice={request.voice}, model={request.model}")
     callback = SSECallback()
 
     # Initialize QwenTtsRealtime for each request to ensure isolation
@@ -111,7 +128,9 @@ async def text_to_speech_stream(request: TTSRequest, http_request: Request):
     def generate():
         audio_accumulator = io.BytesIO()
         try:
+            logger.debug("Connecting to DashScope (stream)...")
             qwen_tts_realtime.connect()
+            logger.debug(f"Updating session (stream): voice={request.voice}")
             qwen_tts_realtime.update_session(
                 voice=request.voice,
                 response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
@@ -119,6 +138,7 @@ async def text_to_speech_stream(request: TTSRequest, http_request: Request):
                 format='pcm',
             )
 
+            logger.debug(f"Appending text (stream): {request.text[:50]}...")
             qwen_tts_realtime.append_text(request.text)
             qwen_tts_realtime.finish()
 
@@ -126,11 +146,14 @@ async def text_to_speech_stream(request: TTSRequest, http_request: Request):
                 try:
                     item = callback.queue.get(timeout=30)
                     if item is None:
+                        logger.debug("Stream finished (received None)")
                         # Handle accumulated audio
                         pcm_data = audio_accumulator.getvalue()
                         if pcm_data and ENABLE_SAVE:
+                            logger.debug("Saving accumulated audio from stream...")
                             wav_data = pcm_to_wav(pcm_data)
                             file_url = save_audio(wav_data, OUTPUT_DIR, http_request.base_url)
+                            logger.info(f"Stream audio saved: {file_url}")
                             yield f"data: {json.dumps({'is_end': True, 'url': file_url})}\n\n"
                         else:
                             yield f"data: {json.dumps({'is_end': True})}\n\n"
@@ -141,9 +164,11 @@ async def text_to_speech_stream(request: TTSRequest, http_request: Request):
 
                     yield f"data: {json.dumps(item)}\n\n"
                 except queue.Empty:
+                    logger.error("Stream synthesis timed out waiting for audio")
                     yield f"data: {json.dumps({'error': 'Timeout waiting for audio'})}\n\n"
                     break
         except Exception as e:
+            logger.exception(f"Error in stream generation: {str(e)}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             # Clean up if needed

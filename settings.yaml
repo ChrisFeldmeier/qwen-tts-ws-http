@@ -3,6 +3,8 @@ dashscope:
 server:
   host: "0.0.0.0"
   port: 9999
+logging:
+  level: "INFO"
 enableSave: true
 storageType: "s3" # options: local, s3
 outputDir: "./output"

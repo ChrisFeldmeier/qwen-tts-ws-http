@@ -4,7 +4,7 @@ import dashscope
 import os
 import uuid
 import boto3
-from config import settings
+from config import settings, logger
 
 def init_dashscope_api_key():
     """
@@ -13,13 +13,16 @@ def init_dashscope_api_key():
     api_key = settings.get('DASHSCOPE_API_KEY') or settings.get('dashscope_api_key')
     if api_key:
         dashscope.api_key = api_key
+        logger.info("DashScope API key initialized")
     else:
+        logger.error("DASHSCOPE_API_KEY is not set in settings or environment variables")
         raise RuntimeError("DASHSCOPE_API_KEY is not set in settings or environment variables")
 
 def pcm_to_wav(pcm_data, sample_rate=24000, channels=1, sample_width=2):
     """
     Encapsulate PCM data into WAV format.
     """
+    logger.debug(f"Converting PCM to WAV: size={len(pcm_data)}, sample_rate={sample_rate}")
     wav_buf = io.BytesIO()
     with wave.open(wav_buf, 'wb') as wav_file:
         wav_file.setnchannels(channels)
@@ -38,8 +41,11 @@ def save_audio_to_s3(wav_audio_data):
     endpoint = settings.get("s3.endpoint")
     region = settings.get("s3.region")
     public_url_prefix = settings.get("s3.publicUrlPrefix")
-    url_type = settings.get("s3.urlType").lower()
-    expires_in = settings.get("s3.expiresIn")
+    url_type = settings.get("s3.urlType", "private").lower()
+    expires_in = settings.get("s3.expiresIn", 3600)
+    
+    logger.debug(f"Saving audio to S3: bucket={bucket}, url_type={url_type}")
+    
     s3_client = boto3.client(
         's3',
         aws_access_key_id=access_key,
@@ -58,13 +64,13 @@ def save_audio_to_s3(wav_audio_data):
         "ContentType": 'audio/wav'
     }
     
-    if url_type == "public":
-        # Note: some S3 providers might require ACL='public-read' for public access
-        # But we only add it if explicitly needed or keep it simple as before
-        pass
+    try:
+        s3_client.put_object(**upload_args)
+        logger.debug(f"File uploaded to S3: {file_name}")
+    except Exception as e:
+        logger.exception(f"Failed to upload to S3: {str(e)}")
+        raise
 
-    s3_client.put_object(**upload_args)
-    
     if url_type == "private":
         return s3_client.generate_presigned_url(
             'get_object',
@@ -98,6 +104,7 @@ def save_audio(wav_audio_data, output_dir=None, base_url=None):
             os.makedirs(output_dir)
             
         file_path = os.path.join(output_dir, file_name)
+        logger.debug(f"Saving audio to local file: {file_path}")
         with open(file_path, "wb") as f:
             f.write(wav_audio_data)
         
