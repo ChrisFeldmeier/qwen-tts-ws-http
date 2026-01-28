@@ -1,4 +1,3 @@
-import os
 import io
 import base64
 import threading
@@ -12,6 +11,7 @@ from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 import wave
+from config import settings
 
 app = FastAPI()
 
@@ -20,10 +20,11 @@ def init_dashscope_api_key():
     """
     Set your DashScope API-key.
     """
-    if 'DASHSCOPE_API_KEY' in os.environ:
-        dashscope.api_key = os.environ['DASHSCOPE_API_KEY']
+    api_key = settings.get('DASHSCOPE_API_KEY') or settings.get('dashscope_api_key')
+    if api_key:
+        dashscope.api_key = api_key
     else:
-        raise RuntimeError("DASHSCOPE_API_KEY environment variable is not set")
+        raise RuntimeError("DASHSCOPE_API_KEY is not set in settings or environment variables")
 
 
 # Initialize API key on startup
@@ -123,7 +124,7 @@ async def text_to_speech(request: TTSRequest):
     qwen_tts_realtime = QwenTtsRealtime(
         model=request.model,
         callback=callback,
-        url='wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
+        url=settings.get('dashscope.url', 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime')
     )
 
     try:
@@ -178,7 +179,7 @@ async def text_to_speech_stream(request: TTSRequest):
     qwen_tts_realtime = QwenTtsRealtime(
         model=request.model,
         callback=callback,
-        url='wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
+        url=settings.get('dashscope.url', 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime')
     )
 
     def generate():
@@ -219,4 +220,8 @@ def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    uvicorn.run(
+        app,
+        host=settings.get('server.host', '0.0.0.0'),
+        port=settings.get('server.port', 9000)
+    )

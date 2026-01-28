@@ -1,0 +1,5 @@
+dashscope:
+  url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+server:
+  host: "0.0.0.0"
+  port: 9000

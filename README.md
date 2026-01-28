@@ -26,16 +26,42 @@
 
 ## 配置
 
-在运行项目之前，需要设置 `DASHSCOPE_API_KEY` 环境变量。你可以通过以下方式设置：
+项目使用 [dynaconf](https://www.dynaconf.com/) 进行配置管理。你可以通过以下方式配置项目：
 
-### macOS/Linux
-```bash
-export DASHSCOPE_API_KEY="您的_DASHSCOPE_API_KEY"
+### 1. 配置文件
+
+在项目根目录下，你可以使用 `settings.yaml` 来配置非敏感信息：
+
+```yaml
+default:
+  dashscope:
+    url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+  server:
+    host: "0.0.0.0"
+    port: 9000
 ```
 
-### Windows (PowerShell)
+敏感信息（如 API Key）建议存放在 `.secrets.yaml`（该文件已被 `.gitignore` 忽略）：
+
+```yaml
+dashscope_api_key: "您的_DASHSCOPE_API_KEY"
+```
+
+### 2. 环境变量
+
+你仍然可以使用环境变量来设置配置项：
+
+#### macOS/Linux
+```bash
+export DASHSCOPE_API_KEY="您的_DASHSCOPE_API_KEY"
+# 或者设置端口
+export SERVER_PORT=9000
+```
+
+#### Windows (PowerShell)
 ```powershell
 $env:DASHSCOPE_API_KEY="您的_DASHSCOPE_API_KEY"
+$env:SERVER_PORT=9000
 ```
 
 ## 运行
