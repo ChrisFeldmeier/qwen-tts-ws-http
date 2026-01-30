@@ -27,6 +27,13 @@ class VoiceDesignRequest(BaseModel):
     language: Optional[str] = "en"  # Sprache: zh, en, de, it, pt, es, ja, ko, fr, ru
 
 
+class VoiceCloningRequest(BaseModel):
+    audio_base64: str  # Base64-kodiertes Audio
+    audio_mime_type: Optional[str] = "audio/wav"  # MIME-Type: audio/wav, audio/mpeg, audio/mp4
+    preferred_name: Optional[str] = "cloned"  # Name für die Stimme
+    language: Optional[str] = None  # Optional: zh, en, de, it, pt, es, ja, ko, fr, ru
+
+
 class VoiceDesignTTSRequest(BaseModel):
     text: str
     voice: str  # Der von Voice Design generierte Stimmenname
@@ -374,6 +381,210 @@ async def delete_voice(voice_name: str):
             
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+# ============ Voice Cloning Endpoints ============
+
+VOICE_CLONING_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/audio/tts/customization"
+VOICE_CLONING_MODEL = "qwen-voice-enrollment"
+VOICE_CLONING_TARGET_MODEL = "qwen3-tts-vc-realtime-2026-01-15"
+
+
+@app.post("/voice_cloning/create")
+async def create_cloned_voice(request: VoiceCloningRequest):
+    """
+    Klont eine Stimme aus einem Audio-Sample (10-20 Sekunden).
+    Audio muss als Base64 übergeben werden.
+    """
+    logger.info(f"Voice Cloning request: mime_type={request.audio_mime_type}")
+    
+    import dashscope
+    import re
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # Sanitize preferred_name
+    preferred_name = request.preferred_name or "cloned"
+    preferred_name = re.sub(r'[^a-zA-Z0-9_]', '', preferred_name)[:16]
+    if not preferred_name:
+        preferred_name = "cloned"
+    
+    # Erstelle Data URI aus Base64
+    data_uri = f"data:{request.audio_mime_type};base64,{request.audio_base64}"
+    
+    input_data = {
+        "action": "create",
+        "target_model": VOICE_CLONING_TARGET_MODEL,
+        "preferred_name": preferred_name,
+        "audio": {"data": data_uri}
+    }
+    
+    # Optional: Sprache hinzufügen
+    if request.language:
+        input_data["language"] = request.language
+    
+    data = {
+        "model": VOICE_CLONING_MODEL,
+        "input": input_data
+    }
+    
+    try:
+        response = requests.post(VOICE_CLONING_URL, headers=headers, json=data, timeout=120)
+        
+        if response.status_code == 200:
+            result = response.json()
+            voice_name = result["output"]["voice"]
+            logger.info(f"Voice cloned successfully: {voice_name}")
+            
+            return {
+                "success": True,
+                "voice": voice_name,
+                "target_model": VOICE_CLONING_TARGET_MODEL
+            }
+        else:
+            error_msg = response.text
+            logger.error(f"Voice cloning failed: {error_msg}")
+            raise HTTPException(status_code=response.status_code, detail=error_msg)
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Voice cloning network error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.get("/voice_cloning/list")
+async def list_cloned_voices(page_index: int = 0, page_size: int = 20):
+    """
+    Listet alle geklonten Stimmen auf.
+    """
+    import dashscope
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": VOICE_CLONING_MODEL,
+        "input": {
+            "action": "list",
+            "page_size": page_size,
+            "page_index": page_index
+        }
+    }
+    
+    try:
+        response = requests.post(VOICE_CLONING_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return {
+                "success": True,
+                "voices": result["output"].get("voice_list", []),
+                "total_count": result["output"].get("total_count", 0)
+            }
+        else:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.delete("/voice_cloning/{voice_name}")
+async def delete_cloned_voice(voice_name: str):
+    """
+    Löscht eine geklonte Stimme.
+    """
+    import dashscope
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": VOICE_CLONING_MODEL,
+        "input": {
+            "action": "delete",
+            "voice": voice_name
+        }
+    }
+    
+    try:
+        response = requests.post(VOICE_CLONING_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            return {"success": True, "deleted": voice_name}
+        else:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.post("/tts_vc_stream")
+async def tts_voice_cloning_stream(request: VoiceDesignTTSRequest, http_request: Request):
+    """
+    TTS Streaming mit einer geklonten Stimme.
+    """
+    logger.info(f"Voice Cloning TTS stream request: voice={request.voice}")
+    callback = SSECallback()
+    
+    qwen_tts_realtime = QwenTtsRealtime(
+        model=VOICE_CLONING_TARGET_MODEL,
+        callback=callback,
+        url=settings.get('dashscope.url', 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime')
+    )
+    
+    def generate():
+        audio_accumulator = io.BytesIO()
+        try:
+            qwen_tts_realtime.connect()
+            qwen_tts_realtime.update_session(
+                voice=request.voice,
+                response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
+                mode='server_commit',
+                language_type=request.language_type,
+                sample_rate=request.sample_rate,
+                pitch_rate=request.pitch_rate,
+                speech_rate=request.speech_rate,
+                volume=request.volume,
+            )
+            
+            qwen_tts_realtime.append_text(request.text)
+            qwen_tts_realtime.finish()
+            
+            while True:
+                try:
+                    item = callback.queue.get(timeout=30)
+                    if item is None:
+                        pcm_data = audio_accumulator.getvalue()
+                        usage_characters = callback.get_usage_characters()
+                        if pcm_data and ENABLE_SAVE:
+                            wav_data = pcm_to_wav(pcm_data)
+                            file_url = save_audio(wav_data, OUTPUT_DIR, http_request.base_url)
+                            yield f"data: {json.dumps({'is_end': True, 'url': file_url, 'usage_characters': usage_characters})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'is_end': True, 'usage_characters': usage_characters})}\n\n"
+                        break
+                    
+                    if isinstance(item, dict) and "audio" in item:
+                        audio_accumulator.write(base64.b64decode(item["audio"]))
+                    
+                    yield f"data: {json.dumps(item)}\n\n"
+                except queue.Empty:
+                    yield f"data: {json.dumps({'error': 'Timeout waiting for audio'})}\n\n"
+                    break
+        except Exception as e:
+            logger.exception(f"Error in VC stream: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/tts_vd_stream")

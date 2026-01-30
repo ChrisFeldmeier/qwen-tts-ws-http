@@ -129,9 +129,10 @@
     <p class="subtitle">Text-zu-Sprache mit Voice Design</p>
     
     <div class="tabs">
-        <div class="tab active" onclick="switchTab('tts')">📡 Standard TTS</div>
-        <div class="tab" onclick="switchTab('voicedesign')">🎨 Voice Design</div>
-        <div class="tab" onclick="switchTab('myvoices')">📂 Meine Stimmen</div>
+        <div class="tab active" onclick="switchTab('tts')">📡 TTS</div>
+        <div class="tab" onclick="switchTab('voicedesign')">🎨 Design</div>
+        <div class="tab" onclick="switchTab('voicecloning')">🎤 Cloning</div>
+        <div class="tab" onclick="switchTab('myvoices')">📂 Stimmen</div>
     </div>
 
     <!-- Standard TTS Tab -->
@@ -289,6 +290,69 @@
         </div>
     </div>
 
+    <!-- Voice Cloning Tab -->
+    <div id="tab-voicecloning" class="tab-content hidden">
+        <div class="card">
+            <h2>🎤 Stimme aus Audio klonen</h2>
+            <p class="help-text">Lade ein Audio-Sample hoch (10-20 Sekunden, klar gesprochen, ohne Hintergrundgeräusche). Die geklonte Stimme wird der Originalstimme sehr ähnlich sein.</p>
+            
+            <div style="margin:16px 0;padding:20px;border:2px dashed rgba(0,212,255,0.3);border-radius:12px;text-align:center;background:rgba(0,0,0,0.2)">
+                <input type="file" id="audioFile" accept="audio/wav,audio/mp3,audio/mpeg,audio/m4a,audio/mp4" style="display:none" onchange="handleAudioFile(this)">
+                <button class="btn-secondary" onclick="document.getElementById('audioFile').click()" style="flex:none">
+                    📁 Audio-Datei auswählen
+                </button>
+                <p id="selectedFileName" style="margin-top:10px;color:#888">Keine Datei ausgewählt</p>
+                <audio id="sourceAudio" controls style="width:100%;margin-top:10px;display:none"></audio>
+            </div>
+            
+            <div class="options-grid">
+                <div>
+                    <label>Stimmen-Name:</label>
+                    <input type="text" id="cloneName" placeholder="z.B. meinestimme" value="cloned">
+                </div>
+                <div>
+                    <label>Sprache (optional):</label>
+                    <select id="cloneLanguage">
+                        <option value="">Auto-Erkennung</option>
+                        <option value="de">Deutsch</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="fr">Français</option>
+                        <option value="es">Español</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn-success" id="cloneVoiceBtn" onclick="cloneVoice()" disabled>🧬 Stimme klonen</button>
+            </div>
+            
+            <div id="cloneResult" class="preview-player hidden">
+                <h3 style="margin:0 0 10px 0;color:#2ed573">✅ Stimme geklont!</h3>
+                <p>Stimmen-ID: <strong id="clonedVoiceName" style="color:#00d4ff"></strong></p>
+                <div class="buttons" style="margin-top:12px">
+                    <button class="btn-primary" onclick="useClonedVoice()">Diese Stimme verwenden →</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Audio-Anforderungen</h2>
+            <div style="font-size:13px;color:#aaa">
+                <ul style="margin:0;padding-left:20px">
+                    <li><strong>Dauer:</strong> 10-20 Sekunden (max 60 Sek)</li>
+                    <li><strong>Format:</strong> WAV, MP3, M4A</li>
+                    <li><strong>Qualität:</strong> Min. 24 kHz, Mono</li>
+                    <li><strong>Inhalt:</strong> Klare Sprache, keine Musik/Geräusche</li>
+                    <li><strong>Größe:</strong> Max 10 MB</li>
+                </ul>
+                <p style="margin-top:10px"><strong>💡 Tipp:</strong> Nimm in einem ruhigen Raum auf, halte 10cm Abstand zum Mikrofon.</p>
+            </div>
+        </div>
+    </div>
+
     <!-- My Voices Tab -->
     <div id="tab-myvoices" class="tab-content hidden">
         <div class="card">
@@ -301,13 +365,19 @@
         
         <div id="vdTtsCard" class="card hidden">
             <h2>🎤 Mit Custom Voice sprechen</h2>
-            <label>Ausgewählte Stimme: <strong id="selectedVoiceName" style="color:#00d4ff"></strong></label>
+            <div style="display:flex;gap:20px;margin-bottom:12px">
+                <label>Stimme: <strong id="selectedVoiceName" style="color:#00d4ff"></strong></label>
+                <label>Typ: <span id="voiceTypeLabel" style="color:#2ed573"></span></label>
+            </div>
             
-            <label style="margin-top:12px">Text:</label>
+            <label>Text:</label>
             <textarea id="vdText" placeholder="Text zum Vorlesen...">Dies ist ein Test mit meiner benutzerdefinierten Stimme.</textarea>
             
             <div class="buttons">
-                <button class="btn-primary" onclick="startVDTTS()">▶️ Abspielen</button>
+                <button class="btn-primary" id="vdPlayBtn" onclick="startVDTTS()">▶️ Abspielen</button>
+            </div>
+            <div id="vdStatus" style="margin-top:12px;display:none">
+                <span id="vdStatusText" style="color:#888">Wird abgespielt...</span>
             </div>
         </div>
     </div>
@@ -323,6 +393,7 @@
         let timerInterval = null;
         let currentCreatedVoice = null;
         let selectedCustomVoice = null;
+        let selectedVoiceType = null; // 'vd' = Voice Design, 'vc' = Voice Cloning
         
         const SAMPLE_RATE = 24000;
         
@@ -336,9 +407,13 @@
         }
         const bars = visualizer.querySelectorAll('.bar');
         
+        let audioFileBase64 = null;
+        let audioFileMimeType = null;
+        let currentClonedVoice = null;
+        
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach((t, i) => {
-                t.classList.toggle('active', ['tts','voicedesign','myvoices'][i] === tab);
+                t.classList.toggle('active', ['tts','voicedesign','voicecloning','myvoices'][i] === tab);
             });
             document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
             document.getElementById('tab-' + tab).classList.remove('hidden');
@@ -531,8 +606,95 @@
         function useCreatedVoice() {
             if (currentCreatedVoice) {
                 selectedCustomVoice = currentCreatedVoice;
+                selectedVoiceType = 'vd'; // Voice Design
                 switchTab('myvoices');
                 document.getElementById('selectedVoiceName').textContent = currentCreatedVoice;
+                document.getElementById('voiceTypeLabel').textContent = '🎨 Voice Design';
+                document.getElementById('vdTtsCard').classList.remove('hidden');
+            }
+        }
+        
+        // Voice Cloning
+        function handleAudioFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            document.getElementById('selectedFileName').textContent = file.name + ' (' + (file.size/1024/1024).toFixed(2) + ' MB)';
+            
+            // Preview
+            const audio = document.getElementById('sourceAudio');
+            audio.src = URL.createObjectURL(file);
+            audio.style.display = 'block';
+            
+            // Determine MIME type
+            const ext = file.name.split('.').pop().toLowerCase();
+            const mimeTypes = {
+                'wav': 'audio/wav',
+                'mp3': 'audio/mpeg',
+                'm4a': 'audio/mp4'
+            };
+            audioFileMimeType = mimeTypes[ext] || 'audio/wav';
+            
+            // Read as Base64
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // Remove data URL prefix
+                const base64 = e.target.result.split(',')[1];
+                audioFileBase64 = base64;
+                document.getElementById('cloneVoiceBtn').disabled = false;
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        async function cloneVoice() {
+            if (!audioFileBase64) {
+                alert('Bitte wähle zuerst eine Audio-Datei aus!');
+                return;
+            }
+            
+            const btn = document.getElementById('cloneVoiceBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Klone Stimme...';
+            
+            try {
+                const lang = document.getElementById('cloneLanguage').value;
+                const body = {
+                    audio_base64: audioFileBase64,
+                    audio_mime_type: audioFileMimeType,
+                    preferred_name: document.getElementById('cloneName').value || 'cloned'
+                };
+                if (lang) body.language = lang;
+                
+                const response = await fetch(API_BASE+'/voice_cloning/create', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify(body)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentClonedVoice = data.voice;
+                    document.getElementById('clonedVoiceName').textContent = data.voice;
+                    document.getElementById('cloneResult').classList.remove('hidden');
+                } else {
+                    alert('Fehler: ' + (data.detail || JSON.stringify(data)));
+                }
+            } catch(e) {
+                alert('Fehler: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🧬 Stimme klonen';
+            }
+        }
+        
+        function useClonedVoice() {
+            if (currentClonedVoice) {
+                selectedCustomVoice = currentClonedVoice;
+                selectedVoiceType = 'vc'; // Voice Cloning
+                switchTab('myvoices');
+                document.getElementById('selectedVoiceName').textContent = currentClonedVoice;
+                document.getElementById('voiceTypeLabel').textContent = '🎤 Voice Cloning';
                 document.getElementById('vdTtsCard').classList.remove('hidden');
             }
         }
@@ -542,44 +704,88 @@
             container.innerHTML = '<p style="color:#888">Lade...</p>';
             
             try {
-                const response = await fetch(API_BASE+'/voice_design/list');
-                const data = await response.json();
+                // Beide Listen parallel laden
+                const [vdResponse, vcResponse] = await Promise.all([
+                    fetch(API_BASE+'/voice_design/list'),
+                    fetch(API_BASE+'/voice_cloning/list')
+                ]);
+                const vdData = await vdResponse.json();
+                const vcData = await vcResponse.json();
                 
-                if (data.success && data.voices.length > 0) {
-                    container.innerHTML = '';
-                    data.voices.forEach(v => {
+                container.innerHTML = '';
+                let hasVoices = false;
+                
+                // Voice Design Stimmen
+                if (vdData.success && vdData.voices && vdData.voices.length > 0) {
+                    hasVoices = true;
+                    const header = document.createElement('h4');
+                    header.style.cssText = 'color:#00d4ff;margin:0 0 10px 0';
+                    header.textContent = '🎨 Voice Design';
+                    container.appendChild(header);
+                    
+                    vdData.voices.forEach(v => {
                         const div = document.createElement('div');
                         div.className = 'voice-item';
                         div.innerHTML = `
                             <div>
                                 <div class="voice-name">${v.voice}</div>
-                                <div class="voice-info">${v.language} • ${v.gmt_create}</div>
+                                <div class="voice-info">${v.language || 'auto'} • ${v.gmt_create}</div>
                             </div>
                             <div class="voice-actions">
-                                <button class="btn-primary" onclick="selectVoice('${v.voice}')">Verwenden</button>
-                                <button class="btn-danger" onclick="deleteVoice('${v.voice}')">🗑️</button>
+                                <button class="btn-primary" onclick="selectVoice('${v.voice}', 'vd')">Verwenden</button>
+                                <button class="btn-danger" onclick="deleteVoice('${v.voice}', 'vd')">🗑️</button>
                             </div>
                         `;
                         container.appendChild(div);
                     });
-                } else {
-                    container.innerHTML = '<p style="color:#888">Keine Stimmen gefunden. Erstelle eine im "Voice Design" Tab!</p>';
+                }
+                
+                // Voice Cloning Stimmen
+                if (vcData.success && vcData.voices && vcData.voices.length > 0) {
+                    hasVoices = true;
+                    const header = document.createElement('h4');
+                    header.style.cssText = 'color:#2ed573;margin:20px 0 10px 0';
+                    header.textContent = '🎤 Voice Cloning';
+                    container.appendChild(header);
+                    
+                    vcData.voices.forEach(v => {
+                        const div = document.createElement('div');
+                        div.className = 'voice-item';
+                        div.innerHTML = `
+                            <div>
+                                <div class="voice-name">${v.voice}</div>
+                                <div class="voice-info">${v.target_model || 'vc'} • ${v.gmt_create}</div>
+                            </div>
+                            <div class="voice-actions">
+                                <button class="btn-primary" onclick="selectVoice('${v.voice}', 'vc')">Verwenden</button>
+                                <button class="btn-danger" onclick="deleteVoice('${v.voice}', 'vc')">🗑️</button>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
+                }
+                
+                if (!hasVoices) {
+                    container.innerHTML = '<p style="color:#888">Keine Stimmen gefunden. Erstelle eine im "Design" oder "Cloning" Tab!</p>';
                 }
             } catch(e) {
                 container.innerHTML = '<p style="color:#ff4757">Fehler: '+e.message+'</p>';
             }
         }
         
-        function selectVoice(voice) {
+        function selectVoice(voice, type) {
             selectedCustomVoice = voice;
+            selectedVoiceType = type || 'vd';
             document.getElementById('selectedVoiceName').textContent = voice;
+            document.getElementById('voiceTypeLabel').textContent = type === 'vc' ? '🎤 Voice Cloning' : '🎨 Voice Design';
             document.getElementById('vdTtsCard').classList.remove('hidden');
         }
         
-        async function deleteVoice(voice) {
+        async function deleteVoice(voice, type) {
             if (!confirm('Stimme "'+voice+'" wirklich löschen?')) return;
+            const endpoint = type === 'vc' ? '/voice_cloning/' : '/voice_design/';
             try {
-                await fetch(API_BASE+'/voice_design/'+voice, {method:'DELETE'});
+                await fetch(API_BASE + endpoint + voice, {method:'DELETE'});
                 loadVoices();
             } catch(e) {
                 alert('Fehler: '+e.message);
@@ -591,12 +797,25 @@
             const text = document.getElementById('vdText').value.trim();
             if (!text) return alert('Bitte Text eingeben!');
             
+            const btn = document.getElementById('vdPlayBtn');
+            const statusEl = document.getElementById('vdStatus');
+            const statusText = document.getElementById('vdStatusText');
+            
+            btn.disabled = true;
+            statusEl.style.display = 'block';
+            statusText.textContent = 'Verbinde...';
+            
             if (!audioContext) audioContext = new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
             if (audioContext.state==='suspended') await audioContext.resume();
             scheduledTime = audioContext.currentTime;
             
+            // Wähle den richtigen Endpunkt basierend auf dem Stimmentyp
+            const endpoint = selectedVoiceType === 'vc' ? '/tts_vc_stream' : '/tts_vd_stream';
+            
             try {
-                const response = await fetch(API_BASE+'/tts_vd_stream', {
+                statusText.textContent = 'Streaming (' + (selectedVoiceType === 'vc' ? 'Cloning' : 'Design') + ')...';
+                
+                const response = await fetch(API_BASE + endpoint, {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({
@@ -608,6 +827,7 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let chunkNum = 0;
                 
                 while (true) {
                     const {done, value} = await reader.read();
@@ -621,13 +841,23 @@
                         if (line.startsWith('data: ')) {
                             try {
                                 const data = JSON.parse(line.slice(6));
-                                if (data.audio) playPCMChunk(base64ToArrayBuffer(data.audio));
+                                if (data.audio) {
+                                    chunkNum++;
+                                    statusText.textContent = 'Chunk ' + chunkNum + ' empfangen...';
+                                    playPCMChunk(base64ToArrayBuffer(data.audio));
+                                }
+                                if (data.is_end) {
+                                    statusText.textContent = 'Fertig! (' + chunkNum + ' chunks)';
+                                }
                             } catch(e) {}
                         }
                     }
                 }
             } catch(e) {
                 alert('Fehler: '+e.message);
+                statusText.textContent = 'Fehler: ' + e.message;
+            } finally {
+                btn.disabled = false;
             }
         }
         
