@@ -1,189 +1,259 @@
 # Qwen-TTS-WS-HTTP
 
-Dieses Projekt kapselt die Echtzeit-WebSocket-Schnittstelle von Alibaba Cloud DashScope Qwen-TTS in eine benutzerfreundliche HTTP-Schnittstelle. Es unterstützt sowohl den Download von Standard-Audiodateien als auch SSE (Server-Sent Events) für Streaming-Audio.
+Dieses Projekt kapselt die Echtzeit-WebSocket-Schnittstelle von Alibaba Cloud DashScope Qwen-TTS in eine benutzerfreundliche HTTP-Schnittstelle. Es unterstützt Standard-TTS, Voice Design (Stimme aus Beschreibung) und Voice Cloning (Stimme aus Audio).
 
 ## Funktionen
 
 - **Einfacher HTTP POST**: Komplette Audiodatei auf einmal abrufen (automatisch als WAV-Format verpackt).
 - **SSE Streaming-Unterstützung**: Echtzeit-Übertragung von Audio-Fragmenten (Base64-kodiertes PCM) für reduzierte Latenz.
-- **Flexible Speicheroptionen**: Unterstützung für lokale Speicherung oder Upload zu S3-kompatiblen Speicherdiensten (z.B. AWS S3, Minio).
-- **Flexible Rückgabeoptionen**: Direkte Rückgabe von Audio-Binärdaten oder einer Zugriffs-URL nach Speicherung.
-- **Automatische Formatkonvertierung**: Interne Umwandlung von PCM zu WAV für direkte Wiedergabe.
-- **Gesundheitsprüfung**: `/health` Endpunkt für Service-Monitoring.
+- **Voice Design**: Erstelle benutzerdefinierte Stimmen aus Textbeschreibungen.
+- **Voice Cloning**: Klone Stimmen aus Audio-Samples (10-20 Sekunden).
+- **Web-Frontend**: Integriertes HTML-Frontend zum Testen aller Funktionen im Browser.
+- **Flexible Speicheroptionen**: Unterstützung für lokale Speicherung oder Upload zu S3-kompatiblen Speicherdiensten.
+- **Download nach Streaming**: WAV-Dateien können nach dem Streaming heruntergeladen werden.
 
 ## Voraussetzungen
 
-- Python 3.13+
-- Alibaba Cloud DashScope API Key
+- Python 3.10+
+- Alibaba Cloud DashScope API Key (International: [dashscope-intl.aliyuncs.com](https://dashscope-intl.aliyuncs.com))
 
 ## Installation
 
 1. Projekt lokal klonen.
 2. Abhängigkeiten installieren:
    ```bash
-   pip install dashscope fastapi uvicorn
-   # Oder mit dem mitgelieferten uv (empfohlen)
-   uv sync
+   pip install dashscope fastapi uvicorn python-multipart dynaconf boto3 requests
    ```
 
 ## Konfiguration
 
-Das Projekt verwendet [dynaconf](https://www.dynaconf.com/) für die Konfigurationsverwaltung. Die Konfiguration kann auf folgende Weisen erfolgen:
+### Konfigurationsdatei
 
-### 1. Konfigurationsdatei
-
-Im Projektverzeichnis kann `settings.yaml` für nicht-sensible Informationen verwendet werden:
+Im Projektverzeichnis `settings.yaml` erstellen:
 
 ```yaml
 default:
   dashscope:
-    url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+    url: "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
   server:
     host: "0.0.0.0"
     port: 9999
-  enableSave: true # Ob synthetisiertes Audio gespeichert werden soll
-  storageType: "local" # Speichertyp: local oder s3
-  outputDir: "./output" # Lokales Speicherverzeichnis
-
-  # S3 Speicherkonfiguration (erforderlich wenn storageType s3 ist)
-  s3:
-    bucket: "your-bucket-name"
-    endpoint: "http://localhost:9000" # S3-Service-Adresse
-    region: "us-west-1"
-    publicUrlPrefix: "" # Optional, benutzerdefinierter Domain-Präfix
-    urlType: "public" # Link-Typ: public oder private
-    expiresIn: 3600 # Gültigkeitsdauer für private Links (Sekunden)
+  enableSave: true
+  storageType: "local"
+  outputDir: "./output"
 ```
 
-Sensible Informationen (wie API Keys) sollten in `.secrets.yaml` gespeichert werden (diese Datei wird von `.gitignore` ignoriert):
+API Key in `.secrets.yaml` speichern:
 
 ```yaml
-dashscope_api_key: "IHR_DASHSCOPE_API_KEY"
-# S3-Schlüssel können auch hier gespeichert werden
-s3:
-  accessKeyId: "..."
-  accessKeySecret: "..."
-```
-
-### 2. Umgebungsvariablen
-
-Konfigurationsoptionen können auch über Umgebungsvariablen gesetzt werden. Das Standard-Präfix ist `DYNACONF_` (sofern nicht anders konfiguriert). Für bestimmte sensible Informationen wird auch direktes Auslesen unterstützt:
-
-- `DASHSCOPE_API_KEY`: Alibaba Cloud DashScope API Key.
-
-Für andere Konfigurationsoptionen siehe das Namensformat in der [dynaconf-Dokumentation](https://www.dynaconf.com/envvars/). Beispiel für das Setzen des Server-Ports:
-```bash
-export DYNACONF_SERVER__PORT=9001
+dashscope_api_key: "sk-xxxxxxxxxxxxxxxx"
 ```
 
 ## Ausführung
-
-Folgenden Befehl ausführen, um den Service zu starten:
 
 ```bash
 python main.py
 ```
 
-Der Service lauscht standardmäßig auf `0.0.0.0:9999`.
+Der Service läuft auf `http://localhost:9999`. Öffne `http://localhost:9999/index.html` für das Web-Frontend.
+
+---
 
 ## API-Dokumentation
 
-### 1. Text-zu-Sprache (WAV-Datei zurückgeben)
+### Standard TTS
 
-Konvertiert Text in eine vollständige WAV-Audiodatei.
-
-- **URL**: `/tts`
-- **Methode**: `POST`
-- **Content-Type**: `application/json`
-
-**Request-Body**:
-
-| Feld | Typ | Erforderlich | Standardwert | Beschreibung |
-| :--- | :--- | :--- | :--- |:--- |
-| `text` | string | Ja | - | Der zu synthetisierende Text |
-| `model` | string | Ja | - | Modellname. Details siehe: [Echtzeit-Sprachsynthese-Qwen](https://help.aliyun.com/zh/model-studio/qwen-tts-realtime) |
-| `voice` | string | Nein | `Cherry` | Gewählte Stimme |
-| `language_type` | string | Nein | `Auto` | Sprachtyp. Optionen: `Auto`, `Chinese`, `English`, `German`, `Italian`, `Portuguese`, `Spanish`, `Japanese`, `Korean`, `French`, `Russian` |
-| `sample_rate` | integer | Nein | `24000` | Audio-Abtastrate (Hz). Übliche Werte: 8000, 16000, 24000, 48000 |
-| `speech_rate` | float | Nein | `1.0` | Sprechgeschwindigkeit, Bereich: [0.5, 2.0] |
-| `volume` | float | Nein | `50` | Lautstärke, Bereich: [0, 100] |
-| `pitch_rate` | float | Nein | `1.0` | Tonhöhe, Bereich: [0.5, 2.0] |
-| `return_url` | boolean | Nein | `false` | Ob eine Audio-URL statt Binärdaten zurückgegeben werden soll (erfordert aktivierte Speicherfunktion) |
-
-**Beispiel-Request (cURL - Binärdaten zurückgeben)**:
+#### POST `/tts` - Vollständige WAV-Datei
 
 ```bash
 curl -X POST http://localhost:9999/tts \
   -H "Content-Type: application/json" \
-  -d '{
-    "text": "Hallo, willkommen beim Qwen Sprachsynthese-Service.",
-    "model": "qwen3-tts-flash-realtime",
-    "voice": "Cherry"
-  }' --output output.wav
+  -d '{"text": "Hallo Welt", "model": "qwen3-tts-flash-realtime", "voice": "Chelsie"}' \
+  --output output.wav
 ```
 
-**Beispiel-Request (cURL - URL zurückgeben)**:
-
-```bash
-curl -X POST http://localhost:9999/tts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Hallo, willkommen beim Qwen Sprachsynthese-Service.",
-    "model": "qwen3-tts-flash-realtime",
-    "return_url": true
-  }'
-```
-
-**Beispiel-Antwort (JSON)**:
-```json
-{
-  "url": "http://localhost:9999/output/xxxx.wav"
-}
-```
-
-### 2. Streaming Text-zu-Sprache (SSE)
-
-Echtzeit-Abruf von Audio-Fragmenten über das SSE-Protokoll.
-
-- **URL**: `/tts_stream`
-- **Methode**: `POST`
-- **Content-Type**: `application/json`
-
-**Request-Body**: Wie oben.
-
-**Beispiel-Request (cURL)**:
+#### POST `/tts_stream` - SSE Streaming
 
 ```bash
 curl -X POST http://localhost:9999/tts_stream \
   -H "Content-Type: application/json" \
+  -d '{"text": "Streaming Test", "model": "qwen3-tts-flash-realtime", "voice": "Chelsie"}'
+```
+
+**Parameter:**
+
+| Feld | Typ | Standard | Beschreibung |
+|------|-----|----------|--------------|
+| `text` | string | - | Zu synthetisierender Text |
+| `model` | string | - | Modellname (z.B. `qwen3-tts-flash-realtime`) |
+| `voice` | string | `Cherry` | Stimmenname (siehe unten) |
+| `language_type` | string | `Auto` | Sprache: Auto, German, English, Chinese, etc. |
+| `sample_rate` | int | `24000` | Abtastrate in Hz |
+| `speech_rate` | float | `1.0` | Geschwindigkeit [0.5-2.0] |
+| `pitch_rate` | float | `1.0` | Tonhöhe [0.5-2.0] |
+| `volume` | float | `50` | Lautstärke [0-100] |
+
+---
+
+### Voice Design
+
+Erstelle benutzerdefinierte Stimmen aus Textbeschreibungen.
+
+**Modell:** `qwen3-tts-vd-realtime-2025-12-16`
+
+#### POST `/voice_design/create` - Stimme erstellen
+
+```bash
+curl -X POST http://localhost:9999/voice_design/create \
+  -H "Content-Type: application/json" \
   -d '{
-    "text": "Hallo, dies ist ein Streaming-Ausgabe-Test.",
-    "model": "qwen3-tts-flash-realtime",
-    "voice": "Cherry"
+    "voice_prompt": "A calm, professional German male voice, around 35 years old, with a deep pitch.",
+    "preview_text": "Hello, this is a test of the voice.",
+    "preferred_name": "narrator",
+    "language": "en"
   }'
 ```
 
-**Beispiel-Antwort**:
-
-```text
-data: {"audio": "...", "is_end": false}
-data: {"audio": "...", "is_end": false}
-...
-data: {"is_end": true, "url": "...", "usage_characters": "12"}
+**Antwort:**
+```json
+{
+  "success": true,
+  "voice": "qwen-tts-vd-narrator-voice-20260130...",
+  "preview_audio": "UklGRi4A...",
+  "target_model": "qwen3-tts-vd-realtime-2025-12-16"
+}
 ```
-*Hinweis: Das `audio`-Feld enthält Base64-kodierte PCM-Daten (24000Hz, Mono, 16bit). Wenn die Speicherfunktion aktiviert ist, enthält die letzte Nachricht die `url` der Audiodatei. `usage_characters` gibt die Anzahl der verbrauchten Zeichen für diese Synthese an.*
 
-### 3. Gesundheitsprüfung
+#### GET `/voice_design/list` - Stimmen auflisten
 
-- **URL**: `/health`
-- **Methode**: `GET`
+```bash
+curl http://localhost:9999/voice_design/list
+```
 
-**Antwort**: `{"status": "ok"}`
+#### DELETE `/voice_design/{voice_name}` - Stimme löschen
 
-## Response-Header
+```bash
+curl -X DELETE http://localhost:9999/voice_design/voice-id-here
+```
 
-Bei der Antwort des `/tts`-Endpunkts werden folgende benutzerdefinierte Header mitgeliefert:
-- `X-Session-Id`: Session-ID dieser Synthese.
-- `X-First-Audio-Delay`: Latenz bis zum ersten Audio-Paket (Millisekunden).
-- `X-Usage-Characters`: Anzahl der verbrauchten Zeichen für diese Synthese.
-- `Content-Type`: `audio/wav` (bei Binärdaten-Rückgabe) oder `application/json` (bei URL-Rückgabe).
+#### POST `/tts_vd_stream` - TTS mit Voice Design Stimme
+
+```bash
+curl -X POST http://localhost:9999/tts_vd_stream \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hallo Welt", "voice": "qwen-tts-vd-narrator-voice-..."}'
+```
+
+---
+
+### Voice Cloning
+
+Klone Stimmen aus Audio-Samples. Kosten: $0.01 pro Stimme (1000 gratis).
+
+**Modell:** `qwen3-tts-vc-realtime-2026-01-15`
+
+#### POST `/voice_cloning/create` - Stimme klonen
+
+```bash
+curl -X POST http://localhost:9999/voice_cloning/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audio_base64": "UklGRi4A...",
+    "audio_mime_type": "audio/wav",
+    "preferred_name": "meinestimme",
+    "language": "de"
+  }'
+```
+
+**Audio-Anforderungen:**
+- Dauer: 10-20 Sekunden (max 60)
+- Format: WAV, MP3, M4A
+- Qualität: Min. 24 kHz, Mono
+- Inhalt: Klare Sprache, keine Hintergrundgeräusche
+- Größe: Max 10 MB
+
+**Antwort:**
+```json
+{
+  "success": true,
+  "voice": "qwen-tts-vc-meinestimme-voice-20260130...",
+  "target_model": "qwen3-tts-vc-realtime-2026-01-15"
+}
+```
+
+#### GET `/voice_cloning/list` - Geklonte Stimmen auflisten
+
+```bash
+curl http://localhost:9999/voice_cloning/list
+```
+
+#### DELETE `/voice_cloning/{voice_name}` - Geklonte Stimme löschen
+
+```bash
+curl -X DELETE http://localhost:9999/voice_cloning/voice-id-here
+```
+
+#### POST `/tts_vc_stream` - TTS mit geklonter Stimme
+
+```bash
+curl -X POST http://localhost:9999/tts_vc_stream \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hallo mit meiner geklonten Stimme", "voice": "qwen-tts-vc-meinestimme-voice-..."}'
+```
+
+---
+
+### Gesundheitsprüfung
+
+```bash
+curl http://localhost:9999/health
+# {"status": "ok"}
+```
+
+---
+
+## Web-Frontend
+
+Öffne `http://localhost:9999/index.html` im Browser für das integrierte Test-Frontend mit:
+
+- **TTS Tab**: Standard Text-to-Speech mit 49 vordefinierten Stimmen
+- **Design Tab**: Voice Design - Stimme aus Beschreibung erstellen
+- **Cloning Tab**: Voice Cloning - Stimme aus Audio klonen
+- **Stimmen Tab**: Verwaltung und Verwendung erstellter Stimmen
+
+Features:
+- Echtzeit-Streaming mit Visualisierung
+- Direkt im Browser abspielen
+- WAV-Download nach Streaming
+- Stopp-Funktion während der Wiedergabe
+
+---
+
+## Verfügbare Stimmen (Standard TTS)
+
+### Englisch
+Chelsie, Ethan, Serena, Aura, Stella, Cherry, Nova, Aria, Maple
+
+### Chinesisch
+龙小淳, 龙小夏, 龙小诚, 龙小白, 龙老铁, 龙二叔, 龙梆梆, 龙家琪, 龙果果, 龙思琪, 龙飞船, 龙马仕, 龙小天, 龙妍妍, 龙悦悦, 龙芊芊, 龙清然, 龙嘤嘤, 龙千千, 龙小萌, 龙青松
+
+### Mehrsprachig
+Camilla (DE/EN), Farah (AR), Layla (AR), Tarik (AR), Lisa (FR), Remy (FR), Luisa (DE), Vivi (ID), Kenzo (ID), Amelia (JA), Haruto (JA), Dahlia (KO), Minho (KO), Aurora (PT), Miguel (PT), Bella (RU), Ivan (RU), Lucia (ES), Carlos (ES)
+
+---
+
+## Modelle
+
+| Modell | Beschreibung | Kosten |
+|--------|--------------|--------|
+| `qwen3-tts-flash-realtime` | Standard TTS (schnell) | $0.05/10k Zeichen |
+| `qwen3-tts-vd-realtime-2025-12-16` | Voice Design TTS | $0.13/10k Zeichen |
+| `qwen3-tts-vc-realtime-2026-01-15` | Voice Cloning TTS | $0.13/10k Zeichen |
+| `qwen-voice-design` | Voice Design erstellen | $0.20/Stimme |
+| `qwen-voice-enrollment` | Voice Cloning erstellen | $0.01/Stimme |
+
+---
+
+## Lizenz
+
+MIT License
