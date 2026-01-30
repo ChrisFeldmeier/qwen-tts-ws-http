@@ -1,12 +1,12 @@
 dashscope:
-  url: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+  url: "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
 server:
   host: "0.0.0.0"
   port: 9999
 logging:
   level: "INFO"
 enableSave: true
-storageType: "s3" # options: local, s3
+storageType: "local" # options: local, s3
 outputDir: "./output"
 s3:
   bucket: "test"
