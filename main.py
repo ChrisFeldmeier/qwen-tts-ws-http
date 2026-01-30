@@ -3,10 +3,14 @@ import base64
 import json
 import os
 import queue
+import requests
 from dashscope.audio.qwen_tts_realtime import QwenTtsRealtime, AudioFormat
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
 import uvicorn
 
 from config import settings, logger
@@ -14,7 +18,34 @@ from models import TTSRequest
 from callbacks import HttpCallback, SSECallback
 from utils import init_dashscope_api_key, pcm_to_wav, save_audio
 
+
+# Voice Design Request Models
+class VoiceDesignRequest(BaseModel):
+    voice_prompt: str  # Beschreibung der gewünschten Stimme
+    preview_text: str  # Text für die Vorschau
+    preferred_name: Optional[str] = "custom"  # Name für die Stimme
+    language: Optional[str] = "en"  # Sprache: zh, en, de, it, pt, es, ja, ko, fr, ru
+
+
+class VoiceDesignTTSRequest(BaseModel):
+    text: str
+    voice: str  # Der von Voice Design generierte Stimmenname
+    language_type: Optional[str] = "Auto"
+    sample_rate: Optional[int] = 24000
+    speech_rate: Optional[float] = 1.0
+    volume: Optional[float] = 50
+    pitch_rate: Optional[float] = 1.0
+
 app = FastAPI()
+
+# CORS für Browser-Zugriff aktivieren
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configure storage
 ENABLE_SAVE = settings.get("enableSave", True)
@@ -192,6 +223,222 @@ async def text_to_speech_stream(request: TTSRequest, http_request: Request):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# ============ Voice Design Endpoints ============
+
+VOICE_DESIGN_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/audio/tts/customization"
+VOICE_DESIGN_MODEL = "qwen-voice-design"
+VOICE_DESIGN_TARGET_MODEL = "qwen3-tts-vd-realtime-2025-12-16"
+
+
+@app.post("/voice_design/create")
+async def create_voice(request: VoiceDesignRequest):
+    """
+    Erstellt eine neue Stimme basierend auf einer Textbeschreibung.
+    Gibt den Stimmennamen und eine Audio-Vorschau zurück.
+    """
+    logger.info(f"Voice Design request: prompt={request.voice_prompt[:50]}...")
+    
+    import dashscope
+    import re
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # Sanitize preferred_name: nur Buchstaben, Zahlen, Unterstriche; max 16 Zeichen
+    preferred_name = request.preferred_name or "voice"
+    preferred_name = re.sub(r'[^a-zA-Z0-9_]', '', preferred_name)[:16]
+    if not preferred_name:
+        preferred_name = "voice"
+    
+    input_data = {
+        "action": "create",
+        "target_model": VOICE_DESIGN_TARGET_MODEL,
+        "voice_prompt": request.voice_prompt,
+        "preview_text": request.preview_text,
+        "language": request.language
+    }
+    
+    # preferred_name nur hinzufügen wenn vorhanden
+    if preferred_name:
+        input_data["preferred_name"] = preferred_name
+    
+    data = {
+        "model": VOICE_DESIGN_MODEL,
+        "input": input_data,
+        "parameters": {
+            "sample_rate": 24000,
+            "response_format": "wav"
+        }
+    }
+    
+    try:
+        response = requests.post(VOICE_DESIGN_URL, headers=headers, json=data, timeout=60)
+        
+        if response.status_code == 200:
+            result = response.json()
+            voice_name = result["output"]["voice"]
+            preview_audio_b64 = result["output"]["preview_audio"]["data"]
+            
+            logger.info(f"Voice created successfully: {voice_name}")
+            
+            return {
+                "success": True,
+                "voice": voice_name,
+                "preview_audio": preview_audio_b64,
+                "target_model": VOICE_DESIGN_TARGET_MODEL
+            }
+        else:
+            error_msg = response.text
+            logger.error(f"Voice design failed: {error_msg}")
+            raise HTTPException(status_code=response.status_code, detail=error_msg)
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Voice design network error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.get("/voice_design/list")
+async def list_voices(page_index: int = 0, page_size: int = 20):
+    """
+    Listet alle erstellten Stimmen auf.
+    """
+    import dashscope
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": VOICE_DESIGN_MODEL,
+        "input": {
+            "action": "list",
+            "page_size": page_size,
+            "page_index": page_index
+        }
+    }
+    
+    try:
+        response = requests.post(VOICE_DESIGN_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return {
+                "success": True,
+                "voices": result["output"].get("voice_list", []),
+                "total_count": result["output"].get("total_count", 0),
+                "page_index": result["output"].get("page_index", 0),
+                "page_size": result["output"].get("page_size", page_size)
+            }
+        else:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.delete("/voice_design/{voice_name}")
+async def delete_voice(voice_name: str):
+    """
+    Löscht eine erstellte Stimme.
+    """
+    import dashscope
+    api_key = dashscope.api_key
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": VOICE_DESIGN_MODEL,
+        "input": {
+            "action": "delete",
+            "voice": voice_name
+        }
+    }
+    
+    try:
+        response = requests.post(VOICE_DESIGN_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            return {"success": True, "deleted": voice_name}
+        else:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
+@app.post("/tts_vd_stream")
+async def tts_voice_design_stream(request: VoiceDesignTTSRequest, http_request: Request):
+    """
+    TTS Streaming mit einer per Voice Design erstellten Stimme.
+    Verwendet das spezielle Voice Design TTS Modell.
+    """
+    logger.info(f"Voice Design TTS stream request: voice={request.voice}")
+    callback = SSECallback()
+    
+    # Voice Design verwendet ein spezielles Modell
+    qwen_tts_realtime = QwenTtsRealtime(
+        model=VOICE_DESIGN_TARGET_MODEL,
+        callback=callback,
+        url=settings.get('dashscope.url', 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime')
+    )
+    
+    def generate():
+        audio_accumulator = io.BytesIO()
+        try:
+            logger.debug("Connecting to DashScope (VD stream)...")
+            qwen_tts_realtime.connect()
+            logger.debug(f"Updating session (VD): voice={request.voice}")
+            qwen_tts_realtime.update_session(
+                voice=request.voice,
+                response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
+                mode='server_commit',
+                language_type=request.language_type,
+                sample_rate=request.sample_rate,
+                pitch_rate=request.pitch_rate,
+                speech_rate=request.speech_rate,
+                volume=request.volume,
+            )
+            
+            logger.debug(f"Appending text (VD): {request.text[:50]}...")
+            qwen_tts_realtime.append_text(request.text)
+            qwen_tts_realtime.finish()
+            
+            while True:
+                try:
+                    item = callback.queue.get(timeout=30)
+                    if item is None:
+                        pcm_data = audio_accumulator.getvalue()
+                        usage_characters = callback.get_usage_characters()
+                        if pcm_data and ENABLE_SAVE:
+                            wav_data = pcm_to_wav(pcm_data)
+                            file_url = save_audio(wav_data, OUTPUT_DIR, http_request.base_url)
+                            yield f"data: {json.dumps({'is_end': True, 'url': file_url, 'usage_characters': usage_characters})}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'is_end': True, 'usage_characters': usage_characters})}\n\n"
+                        break
+                    
+                    if isinstance(item, dict) and "audio" in item:
+                        audio_accumulator.write(base64.b64decode(item["audio"]))
+                    
+                    yield f"data: {json.dumps(item)}\n\n"
+                except queue.Empty:
+                    yield f"data: {json.dumps({'error': 'Timeout waiting for audio'})}\n\n"
+                    break
+        except Exception as e:
+            logger.exception(f"Error in VD stream: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":

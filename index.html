@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qwen TTS Streaming Test</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 10px; }
+        h2 { color: #00d4ff; margin: 0 0 16px 0; font-size: 18px; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 30px; }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 14px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            color: #888;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .tab.active {
+            background: rgba(0,212,255,0.2);
+            border-color: #00d4ff;
+            color: #00d4ff;
+        }
+        .tab:hover:not(.active) { background: rgba(255,255,255,0.1); }
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .hidden { display: none !important; }
+        label { display: block; margin-bottom: 6px; font-weight: 500; color: #b0b0b0; }
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            font-size: 14px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            resize: vertical;
+        }
+        textarea { height: 100px; }
+        textarea:focus, input:focus, select:focus { outline: none; border-color: #00d4ff; }
+        .options-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            font-size: 14px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+        }
+        .range-value { color: #00d4ff; font-weight: bold; }
+        .buttons { display: flex; gap: 12px; margin-top: 20px; }
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%); color: #000; }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,212,255,0.4); }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); }
+        .btn-danger { background: #ff4757; color: #fff; }
+        .btn-success { background: #2ed573; color: #000; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { margin-top: 16px; padding: 12px; border-radius: 8px; background: rgba(0,0,0,0.3); }
+        .status-indicator { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
+        .status-dot.idle { background: #666; }
+        .status-dot.connecting { background: #ffa502; animation: pulse 1s infinite; }
+        .status-dot.streaming { background: #2ed573; animation: pulse 0.5s infinite; }
+        .status-dot.complete { background: #00d4ff; }
+        .status-dot.error { background: #ff4757; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 13px; color: #888; }
+        .stat-value { font-weight: bold; color: #00d4ff; }
+        .log { max-height: 120px; overflow-y: auto; font-family: monospace; font-size: 12px; padding: 10px; background: rgba(0,0,0,0.4); border-radius: 6px; margin-top: 10px; }
+        .log-entry { margin: 2px 0; color: #888; }
+        .log-entry.info { color: #00d4ff; }
+        .log-entry.success { color: #2ed573; }
+        .log-entry.error { color: #ff4757; }
+        .visualizer { height: 50px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 3px; padding: 0 20px; }
+        .bar { width: 4px; background: linear-gradient(to top, #00d4ff, #0099cc); border-radius: 2px; transition: height 0.1s; }
+        .voice-list { max-height: 200px; overflow-y: auto; }
+        .voice-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 8px; }
+        .voice-item:hover { background: rgba(0,212,255,0.1); }
+        .voice-name { font-weight: 600; color: #00d4ff; }
+        .voice-info { font-size: 12px; color: #888; }
+        .voice-actions { display: flex; gap: 8px; }
+        .voice-actions button { flex: none; padding: 6px 12px; font-size: 12px; }
+        .preview-player { margin-top: 16px; padding: 16px; background: rgba(0,212,255,0.1); border-radius: 8px; border: 1px solid rgba(0,212,255,0.3); }
+        .help-text { font-size: 12px; color: #888; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>🎙️ Qwen TTS Lab</h1>
+    <p class="subtitle">Text-zu-Sprache mit Voice Design</p>
+    
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('tts')">📡 Standard TTS</div>
+        <div class="tab" onclick="switchTab('voicedesign')">🎨 Voice Design</div>
+        <div class="tab" onclick="switchTab('myvoices')">📂 Meine Stimmen</div>
+    </div>
+
+    <!-- Standard TTS Tab -->
+    <div id="tab-tts" class="tab-content">
+        <div class="card">
+            <h2>Text-zu-Sprache</h2>
+            <label>Text zum Vorlesen:</label>
+            <textarea id="text" placeholder="Gib hier den Text ein...">Hallo! Dies ist ein Test der Qwen Sprachsynthese. Die Stimme klingt sehr natürlich.</textarea>
+            
+            <div class="options-grid">
+                <div>
+                    <label>Modell:</label>
+                    <select id="model">
+                        <option value="qwen3-tts-flash-realtime">qwen3-tts-flash-realtime</option>
+                        <option value="qwen3-tts-realtime">qwen3-tts-realtime</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Stimme:</label>
+                    <select id="voice">
+                        <optgroup label="🌍 Internationale Stimmen">
+                            <option value="Cherry">Cherry - Sonnig, positiv (W)</option>
+                            <option value="Serena">Serena - Sanft (W)</option>
+                            <option value="Ethan">Ethan - Hell, warm (M)</option>
+                            <option value="Chelsie">Chelsie - Anime-Stil (W)</option>
+                            <option value="Momo">Momo - Verspielt (W)</option>
+                            <option value="Vivian">Vivian - Cool (W)</option>
+                            <option value="Moon">Moon - Spontan (M)</option>
+                            <option value="Maia">Maia - Intelligent (W)</option>
+                            <option value="Kai">Kai - Beruhigend (M)</option>
+                            <option value="Bella">Bella - Zierlich (W)</option>
+                            <option value="Bunny">Bunny - Süß (W)</option>
+                            <option value="Mia">Mia - Sanft (W)</option>
+                        </optgroup>
+                        <optgroup label="🎬 Professionell">
+                            <option value="Jennifer">Jennifer - Premium US (W)</option>
+                            <option value="Ryan">Ryan - Dramatisch (M)</option>
+                            <option value="Katerina">Katerina - Reif (W)</option>
+                            <option value="Neil">Neil - Nachrichtensprecher (M)</option>
+                            <option value="Elias">Elias - Akademisch (M)</option>
+                            <option value="Andre">Andre - Magnetisch (M)</option>
+                        </optgroup>
+                        <optgroup label="🎭 Charakterstimmen">
+                            <option value="Eldric Sage">Eldric Sage - Weiser Mann (M)</option>
+                            <option value="Vincent">Vincent - Rauchig (M)</option>
+                            <option value="Ebona">Ebona - Flüster (W)</option>
+                            <option value="Seren">Seren - Einschlaf (W)</option>
+                            <option value="Pip">Pip - Kindlich (M)</option>
+                        </optgroup>
+                        <optgroup label="🌐 Internationale Akzente">
+                            <option value="Lenn">Lenn - Deutsch (M)</option>
+                            <option value="Emilien">Emilien - Französisch (M)</option>
+                            <option value="Bodega">Bodega - Spanisch (M)</option>
+                            <option value="Alek">Alek - Russisch (M)</option>
+                            <option value="Dolce">Dolce - Italienisch (M)</option>
+                            <option value="Sohee">Sohee - Koreanisch (W)</option>
+                            <option value="Ono Anna">Ono Anna - Japanisch (W)</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div>
+                    <label>Sprache:</label>
+                    <select id="language">
+                        <option value="Auto">Auto</option>
+                        <option value="German">Deutsch</option>
+                        <option value="English">English</option>
+                        <option value="Chinese">中文</option>
+                        <option value="Japanese">日本語</option>
+                        <option value="French">Français</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Geschwindigkeit: <span class="range-value" id="speedValue">1.0</span></label>
+                    <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1" oninput="document.getElementById('speedValue').textContent=this.value">
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn-primary" id="playBtn" onclick="startTTS()">▶️ Abspielen</button>
+                <button class="btn-danger" id="stopBtn" onclick="stopTTS()" disabled>⏹️ Stoppen</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Bereit</span>
+            </div>
+            <div class="visualizer" id="visualizer"></div>
+            <div class="stats">
+                <div>Chunks: <span class="stat-value" id="chunkCount">0</span></div>
+                <div>Bytes: <span class="stat-value" id="byteCount">0</span></div>
+                <div>Zeit: <span class="stat-value" id="timeElapsed">0.0s</span></div>
+            </div>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+
+    <!-- Voice Design Tab -->
+    <div id="tab-voicedesign" class="tab-content hidden">
+        <div class="card">
+            <h2>🎨 Stimme aus Beschreibung erstellen</h2>
+            <p class="help-text">Beschreibe die gewünschte Stimme detailliert. Verwende Dimensionen wie Geschlecht, Alter, Tonhöhe, Sprechgeschwindigkeit, Emotion und Charakteristik.</p>
+            
+            <label>Stimmen-Beschreibung (Englisch oder Chinesisch):</label>
+            <textarea id="voicePrompt" placeholder="z.B.: A warm, friendly young female voice with a medium pitch, slightly fast speaking rate, cheerful and energetic tone. Perfect for podcast hosting or product advertisements.">A calm, professional German male voice, around 35 years old, with a deep pitch, steady speaking rate, and clear articulation. Suitable for audiobook narration or documentary voiceover.</textarea>
+            
+            <label style="margin-top:16px">Vorschau-Text:</label>
+            <textarea id="previewText" style="height:60px" placeholder="Text für die Audio-Vorschau">Hello everyone, welcome to this demonstration. I hope you enjoy the voice quality.</textarea>
+            
+            <div class="options-grid">
+                <div>
+                    <label>Stimmen-Name (optional):</label>
+                    <input type="text" id="voiceName" placeholder="z.B. narrator" value="myvoice">
+                </div>
+                <div>
+                    <label>Sprache:</label>
+                    <select id="vdLanguage">
+                        <option value="en">English</option>
+                        <option value="de">Deutsch</option>
+                        <option value="zh">中文</option>
+                        <option value="fr">Français</option>
+                        <option value="es">Español</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                        <option value="ru">Русский</option>
+                        <option value="it">Italiano</option>
+                        <option value="pt">Português</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn-success" id="createVoiceBtn" onclick="createVoice()">✨ Stimme erstellen</button>
+            </div>
+            
+            <div id="voicePreview" class="preview-player hidden">
+                <h3 style="margin:0 0 10px 0;color:#2ed573">✅ Stimme erstellt!</h3>
+                <p>Stimmen-ID: <strong id="createdVoiceName" style="color:#00d4ff"></strong></p>
+                <audio id="previewAudio" controls style="width:100%;margin-top:10px"></audio>
+                <div class="buttons" style="margin-top:12px">
+                    <button class="btn-primary" onclick="useCreatedVoice()">Diese Stimme verwenden →</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>💡 Tipps für gute Beschreibungen</h2>
+            <div style="font-size:13px;color:#aaa">
+                <p><strong>✅ Gut:</strong> "A young, lively female voice with a fast speaking rate and noticeably rising intonation, suitable for introducing fashion products."</p>
+                <p><strong>✅ Gut:</strong> "A calm middle-aged male voice with a slow speaking rate, deep and magnetic tone, ideal for news reading."</p>
+                <p><strong>❌ Schlecht:</strong> "Nice-sounding voice" (zu vage)</p>
+                <p><strong>❌ Schlecht:</strong> "Sounds like [Promi-Name]" (nicht erlaubt)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- My Voices Tab -->
+    <div id="tab-myvoices" class="tab-content hidden">
+        <div class="card">
+            <h2>📂 Meine erstellten Stimmen</h2>
+            <button class="btn-secondary" onclick="loadVoices()" style="margin-bottom:16px">🔄 Aktualisieren</button>
+            <div id="voiceListContainer" class="voice-list">
+                <p style="color:#888">Klicke auf "Aktualisieren" um deine Stimmen zu laden...</p>
+            </div>
+        </div>
+        
+        <div id="vdTtsCard" class="card hidden">
+            <h2>🎤 Mit Custom Voice sprechen</h2>
+            <label>Ausgewählte Stimme: <strong id="selectedVoiceName" style="color:#00d4ff"></strong></label>
+            
+            <label style="margin-top:12px">Text:</label>
+            <textarea id="vdText" placeholder="Text zum Vorlesen...">Dies ist ein Test mit meiner benutzerdefinierten Stimme.</textarea>
+            
+            <div class="buttons">
+                <button class="btn-primary" onclick="startVDTTS()">▶️ Abspielen</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:9999';
+        let audioContext = null;
+        let isPlaying = false;
+        let scheduledTime = 0;
+        let chunkCount = 0;
+        let totalBytes = 0;
+        let startTime = null;
+        let timerInterval = null;
+        let currentCreatedVoice = null;
+        let selectedCustomVoice = null;
+        
+        const SAMPLE_RATE = 24000;
+        
+        // Visualizer
+        const visualizer = document.getElementById('visualizer');
+        for (let i = 0; i < 35; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            bar.style.height = '4px';
+            visualizer.appendChild(bar);
+        }
+        const bars = visualizer.querySelectorAll('.bar');
+        
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach((t, i) => {
+                t.classList.toggle('active', ['tts','voicedesign','myvoices'][i] === tab);
+            });
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById('tab-' + tab).classList.remove('hidden');
+        }
+        
+        function setStatus(status, text) {
+            document.getElementById('statusDot').className = 'status-dot ' + status;
+            document.getElementById('statusText').textContent = text;
+        }
+        
+        function log(msg, type='') {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function updateStats() {
+            document.getElementById('chunkCount').textContent = chunkCount;
+            document.getElementById('byteCount').textContent = (totalBytes/1024).toFixed(1) + ' KB';
+            if (startTime) {
+                document.getElementById('timeElapsed').textContent = ((Date.now()-startTime)/1000).toFixed(1) + 's';
+            }
+        }
+        
+        function animateBars(active) {
+            bars.forEach(bar => {
+                bar.style.height = active ? (Math.random()*40+5)+'px' : '4px';
+            });
+        }
+        
+        async function startTTS() {
+            const text = document.getElementById('text').value.trim();
+            if (!text) return alert('Bitte Text eingeben!');
+            
+            chunkCount = 0; totalBytes = 0; startTime = Date.now(); scheduledTime = 0;
+            document.getElementById('log').innerHTML = '';
+            timerInterval = setInterval(updateStats, 100);
+            
+            if (!audioContext) audioContext = new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
+            if (audioContext.state==='suspended') await audioContext.resume();
+            isPlaying = true;
+            scheduledTime = audioContext.currentTime;
+            
+            setStatus('connecting','Verbinde...');
+            log('Starte Stream...','info');
+            
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            const animInterval = setInterval(() => { if(isPlaying) animateBars(true); }, 100);
+            
+            try {
+                const response = await fetch(API_BASE+'/tts_stream', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        text: text,
+                        model: document.getElementById('model').value,
+                        voice: document.getElementById('voice').value,
+                        language_type: document.getElementById('language').value,
+                        speech_rate: parseFloat(document.getElementById('speed').value)
+                    })
+                });
+                
+                setStatus('streaming','Streaming...');
+                log('Audio empfangen...','success');
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done || !isPlaying) break;
+                    
+                    buffer += decoder.decode(value, {stream:true});
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.error) { log('Fehler: '+data.error,'error'); continue; }
+                                if (data.audio) {
+                                    chunkCount++;
+                                    const pcm = base64ToArrayBuffer(data.audio);
+                                    totalBytes += pcm.byteLength;
+                                    updateStats();
+                                    playPCMChunk(pcm);
+                                }
+                                if (data.is_end) log('Stream beendet. '+data.usage_characters+' Zeichen','success');
+                            } catch(e) {}
+                        }
+                    }
+                }
+                setStatus('complete','Fertig');
+            } catch(e) {
+                setStatus('error','Fehler');
+                log('Fehler: '+e.message,'error');
+            } finally {
+                isPlaying = false;
+                clearInterval(animInterval);
+                clearInterval(timerInterval);
+                animateBars(false);
+                document.getElementById('playBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+            }
+        }
+        
+        function stopTTS() {
+            isPlaying = false;
+            setStatus('idle','Gestoppt');
+            animateBars(false);
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        }
+        
+        function base64ToArrayBuffer(b64) {
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return bytes.buffer;
+        }
+        
+        function playPCMChunk(pcm) {
+            const int16 = new Int16Array(pcm);
+            const float32 = new Float32Array(int16.length);
+            for (let i=0; i<int16.length; i++) float32[i] = int16[i]/32768.0;
+            
+            const buf = audioContext.createBuffer(1, float32.length, SAMPLE_RATE);
+            buf.getChannelData(0).set(float32);
+            
+            const src = audioContext.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioContext.destination);
+            
+            const now = audioContext.currentTime;
+            if (scheduledTime < now) scheduledTime = now;
+            src.start(scheduledTime);
+            scheduledTime += buf.duration;
+        }
+        
+        // Voice Design
+        async function createVoice() {
+            const btn = document.getElementById('createVoiceBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Erstelle...';
+            
+            try {
+                const response = await fetch(API_BASE+'/voice_design/create', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        voice_prompt: document.getElementById('voicePrompt').value,
+                        preview_text: document.getElementById('previewText').value,
+                        preferred_name: document.getElementById('voiceName').value || 'custom',
+                        language: document.getElementById('vdLanguage').value
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentCreatedVoice = data.voice;
+                    document.getElementById('createdVoiceName').textContent = data.voice;
+                    
+                    // Play preview
+                    const audioData = atob(data.preview_audio);
+                    const audioBytes = new Uint8Array(audioData.length);
+                    for (let i=0; i<audioData.length; i++) audioBytes[i] = audioData.charCodeAt(i);
+                    const blob = new Blob([audioBytes], {type:'audio/wav'});
+                    document.getElementById('previewAudio').src = URL.createObjectURL(blob);
+                    
+                    document.getElementById('voicePreview').classList.remove('hidden');
+                } else {
+                    alert('Fehler: ' + (data.detail || 'Unbekannter Fehler'));
+                }
+            } catch(e) {
+                alert('Fehler: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '✨ Stimme erstellen';
+            }
+        }
+        
+        function useCreatedVoice() {
+            if (currentCreatedVoice) {
+                selectedCustomVoice = currentCreatedVoice;
+                switchTab('myvoices');
+                document.getElementById('selectedVoiceName').textContent = currentCreatedVoice;
+                document.getElementById('vdTtsCard').classList.remove('hidden');
+            }
+        }
+        
+        async function loadVoices() {
+            const container = document.getElementById('voiceListContainer');
+            container.innerHTML = '<p style="color:#888">Lade...</p>';
+            
+            try {
+                const response = await fetch(API_BASE+'/voice_design/list');
+                const data = await response.json();
+                
+                if (data.success && data.voices.length > 0) {
+                    container.innerHTML = '';
+                    data.voices.forEach(v => {
+                        const div = document.createElement('div');
+                        div.className = 'voice-item';
+                        div.innerHTML = `
+                            <div>
+                                <div class="voice-name">${v.voice}</div>
+                                <div class="voice-info">${v.language} • ${v.gmt_create}</div>
+                            </div>
+                            <div class="voice-actions">
+                                <button class="btn-primary" onclick="selectVoice('${v.voice}')">Verwenden</button>
+                                <button class="btn-danger" onclick="deleteVoice('${v.voice}')">🗑️</button>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else {
+                    container.innerHTML = '<p style="color:#888">Keine Stimmen gefunden. Erstelle eine im "Voice Design" Tab!</p>';
+                }
+            } catch(e) {
+                container.innerHTML = '<p style="color:#ff4757">Fehler: '+e.message+'</p>';
+            }
+        }
+        
+        function selectVoice(voice) {
+            selectedCustomVoice = voice;
+            document.getElementById('selectedVoiceName').textContent = voice;
+            document.getElementById('vdTtsCard').classList.remove('hidden');
+        }
+        
+        async function deleteVoice(voice) {
+            if (!confirm('Stimme "'+voice+'" wirklich löschen?')) return;
+            try {
+                await fetch(API_BASE+'/voice_design/'+voice, {method:'DELETE'});
+                loadVoices();
+            } catch(e) {
+                alert('Fehler: '+e.message);
+            }
+        }
+        
+        async function startVDTTS() {
+            if (!selectedCustomVoice) return alert('Keine Stimme ausgewählt!');
+            const text = document.getElementById('vdText').value.trim();
+            if (!text) return alert('Bitte Text eingeben!');
+            
+            if (!audioContext) audioContext = new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
+            if (audioContext.state==='suspended') await audioContext.resume();
+            scheduledTime = audioContext.currentTime;
+            
+            try {
+                const response = await fetch(API_BASE+'/tts_vd_stream', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        text: text,
+                        voice: selectedCustomVoice
+                    })
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, {stream:true});
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.audio) playPCMChunk(base64ToArrayBuffer(data.audio));
+                            } catch(e) {}
+                        }
+                    }
+                }
+            } catch(e) {
+                alert('Fehler: '+e.message);
+            }
+        }
+        
+        setStatus('idle','Bereit');
+    </script>
+</body>
+</html>
