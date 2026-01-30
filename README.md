@@ -1,38 +1,38 @@
 # Qwen-TTS-WS-HTTP
 
-该项目将阿里云 DashScope 的 Qwen-TTS 实时 WebSocket 接口封装为易于使用的 HTTP 接口，支持标准音频文件下载和 SSE (Server-Sent Events) 流式音频推送。
+Dieses Projekt kapselt die Echtzeit-WebSocket-Schnittstelle von Alibaba Cloud DashScope Qwen-TTS in eine benutzerfreundliche HTTP-Schnittstelle. Es unterstützt sowohl den Download von Standard-Audiodateien als auch SSE (Server-Sent Events) für Streaming-Audio.
 
-## 功能特性
+## Funktionen
 
-- **简单 HTTP POST**: 一次性获取完整音频（自动封装为 WAV 格式）。
-- **SSE 流式支持**: 实时推送音频分片（Base64 编码的 PCM），降低首包延迟。
-- **多端存储支持**: 支持将合成音频保存至本地或上传至 S3 兼容存储（如 AWS S3, Minio）。
-- **灵活的返回方式**: 支持直接返回音频二进制数据，或返回音频存储后的访问 URL。
-- **自动格式转换**: 内部处理 PCM 到 WAV 的转换，方便播放器直接调用。
-- **健康检查**: 提供 `/health` 接口用于服务监控。
+- **Einfacher HTTP POST**: Komplette Audiodatei auf einmal abrufen (automatisch als WAV-Format verpackt).
+- **SSE Streaming-Unterstützung**: Echtzeit-Übertragung von Audio-Fragmenten (Base64-kodiertes PCM) für reduzierte Latenz.
+- **Flexible Speicheroptionen**: Unterstützung für lokale Speicherung oder Upload zu S3-kompatiblen Speicherdiensten (z.B. AWS S3, Minio).
+- **Flexible Rückgabeoptionen**: Direkte Rückgabe von Audio-Binärdaten oder einer Zugriffs-URL nach Speicherung.
+- **Automatische Formatkonvertierung**: Interne Umwandlung von PCM zu WAV für direkte Wiedergabe.
+- **Gesundheitsprüfung**: `/health` Endpunkt für Service-Monitoring.
 
-## 环境要求
+## Voraussetzungen
 
 - Python 3.13+
-- 阿里云 DashScope API Key
+- Alibaba Cloud DashScope API Key
 
-## 安装
+## Installation
 
-1. 克隆项目到本地。
-2. 安装依赖：
+1. Projekt lokal klonen.
+2. Abhängigkeiten installieren:
    ```bash
    pip install dashscope fastapi uvicorn
-   # 或者使用项目自带的 uv (推荐)
+   # Oder mit dem mitgelieferten uv (empfohlen)
    uv sync
    ```
 
-## 配置
+## Konfiguration
 
-项目使用 [dynaconf](https://www.dynaconf.com/) 进行配置管理。你可以通过以下方式配置项目：
+Das Projekt verwendet [dynaconf](https://www.dynaconf.com/) für die Konfigurationsverwaltung. Die Konfiguration kann auf folgende Weisen erfolgen:
 
-### 1. 配置文件
+### 1. Konfigurationsdatei
 
-在项目根目录下，你可以使用 `settings.yaml` 来配置非敏感信息：
+Im Projektverzeichnis kann `settings.yaml` für nicht-sensible Informationen verwendet werden:
 
 ```yaml
 default:
@@ -41,129 +41,129 @@ default:
   server:
     host: "0.0.0.0"
     port: 9999
-  enableSave: true # 是否保存合成后的音频
-  storageType: "local" # 存储类型：local 或 s3
-  outputDir: "./output" # 本地存储目录
+  enableSave: true # Ob synthetisiertes Audio gespeichert werden soll
+  storageType: "local" # Speichertyp: local oder s3
+  outputDir: "./output" # Lokales Speicherverzeichnis
 
-  # S3 存储配置 (当 storageType 为 s3 时必填)
+  # S3 Speicherkonfiguration (erforderlich wenn storageType s3 ist)
   s3:
     bucket: "your-bucket-name"
-    endpoint: "http://localhost:9000" # S3 服务地址
+    endpoint: "http://localhost:9000" # S3-Service-Adresse
     region: "us-west-1"
-    publicUrlPrefix: "" # 可选，自定义域名协议头
-    urlType: "public" # 链接类型：public 或 private
-    expiresIn: 3600 # 私有链接有效期（秒）
+    publicUrlPrefix: "" # Optional, benutzerdefinierter Domain-Präfix
+    urlType: "public" # Link-Typ: public oder private
+    expiresIn: 3600 # Gültigkeitsdauer für private Links (Sekunden)
 ```
 
-敏感信息（如 API Key）建议存放在 `.secrets.yaml`（该文件已被 `.gitignore` 忽略）：
+Sensible Informationen (wie API Keys) sollten in `.secrets.yaml` gespeichert werden (diese Datei wird von `.gitignore` ignoriert):
 
 ```yaml
-dashscope_api_key: "您的_DASHSCOPE_API_KEY"
-# 也可以在这里存放 S3 密钥
+dashscope_api_key: "IHR_DASHSCOPE_API_KEY"
+# S3-Schlüssel können auch hier gespeichert werden
 s3:
   accessKeyId: "..."
   accessKeySecret: "..."
 ```
 
-### 2. 环境变量
+### 2. Umgebungsvariablen
 
-你仍然可以使用环境变量来设置配置项。环境变量的前缀通常是 `DYNACONF_`（除非有特殊配置），但对于某些敏感信息，我们也支持直接读取：
+Konfigurationsoptionen können auch über Umgebungsvariablen gesetzt werden. Das Standard-Präfix ist `DYNACONF_` (sofern nicht anders konfiguriert). Für bestimmte sensible Informationen wird auch direktes Auslesen unterstützt:
 
-- `DASHSCOPE_API_KEY`: 阿里云 DashScope 的 API Key。
+- `DASHSCOPE_API_KEY`: Alibaba Cloud DashScope API Key.
 
-对于其他配置项，请参考 [dynaconf](https://www.dynaconf.com/envvars/) 给出的命名格式进行配置。例如，设置服务器端口：
+Für andere Konfigurationsoptionen siehe das Namensformat in der [dynaconf-Dokumentation](https://www.dynaconf.com/envvars/). Beispiel für das Setzen des Server-Ports:
 ```bash
 export DYNACONF_SERVER__PORT=9001
 ```
 
-## 运行
+## Ausführung
 
-执行以下命令启动服务：
+Folgenden Befehl ausführen, um den Service zu starten:
 
 ```bash
 python main.py
 ```
 
-服务默认监听 `0.0.0.0:9999`。
+Der Service lauscht standardmäßig auf `0.0.0.0:9999`.
 
-## API 文档
+## API-Dokumentation
 
-### 1. 文本转语音 (返回 WAV 文件)
+### 1. Text-zu-Sprache (WAV-Datei zurückgeben)
 
-将文本转换为完整的 WAV 音频文件。
+Konvertiert Text in eine vollständige WAV-Audiodatei.
 
 - **URL**: `/tts`
-- **方法**: `POST`
+- **Methode**: `POST`
 - **Content-Type**: `application/json`
 
-**请求体**:
+**Request-Body**:
 
-| 字段 | 类型 | 必填 | 默认值 | 说明                                                                                                                   |
-| :--- | :--- | :--- | :--- |:---------------------------------------------------------------------------------------------------------------------|
-| `text` | string | 是 | - | 需要合成的文本内容                                                                                                            |
-| `model` | string | 是 | - | 使用的模型名称。具体信息参考：[实时语音合成-通义千问](https://help.aliyun.com/zh/model-studio/qwen-tts-realtime)                              |
-| `voice` | string | 否 | `Cherry` | 选用的音色名称                                                                                                              |
-| `language_type` | string | 否 | `Auto` | 语言类型。可选：`Auto`, `Chinese`, `English`, `German`, `Italian`, `Portuguese` ,`Spanish` 、`Japanese` 、`Korean` 、`French` 、`Russian` |
-| `sample_rate` | integer | 否 | `24000` | 音频采样率（Hz）。常用的有 8000, 16000, 24000, 48000                                                                             |
-| `speech_rate` | float | 否 | `1.0` | 语速，取值范围：[0.5, 2.0]                                                                                                   |
-| `volume` | float | 否 | `50` | 音量，取值范围：[0, 100]                                                                                                     |
-| `pitch_rate` | float | 否 | `1.0` | 语调，取值范围：[0.5, 2.0]                                                                                                   |
-| `return_url` | boolean | 否 | `false` | 是否返回音频 URL 而不是二进制数据（需开启存储功能）                                                                                         |
+| Feld | Typ | Erforderlich | Standardwert | Beschreibung |
+| :--- | :--- | :--- | :--- |:--- |
+| `text` | string | Ja | - | Der zu synthetisierende Text |
+| `model` | string | Ja | - | Modellname. Details siehe: [Echtzeit-Sprachsynthese-Qwen](https://help.aliyun.com/zh/model-studio/qwen-tts-realtime) |
+| `voice` | string | Nein | `Cherry` | Gewählte Stimme |
+| `language_type` | string | Nein | `Auto` | Sprachtyp. Optionen: `Auto`, `Chinese`, `English`, `German`, `Italian`, `Portuguese`, `Spanish`, `Japanese`, `Korean`, `French`, `Russian` |
+| `sample_rate` | integer | Nein | `24000` | Audio-Abtastrate (Hz). Übliche Werte: 8000, 16000, 24000, 48000 |
+| `speech_rate` | float | Nein | `1.0` | Sprechgeschwindigkeit, Bereich: [0.5, 2.0] |
+| `volume` | float | Nein | `50` | Lautstärke, Bereich: [0, 100] |
+| `pitch_rate` | float | Nein | `1.0` | Tonhöhe, Bereich: [0.5, 2.0] |
+| `return_url` | boolean | Nein | `false` | Ob eine Audio-URL statt Binärdaten zurückgegeben werden soll (erfordert aktivierte Speicherfunktion) |
 
-**示例请求 (cURL - 返回二进制)**:
+**Beispiel-Request (cURL - Binärdaten zurückgeben)**:
 
 ```bash
 curl -X POST http://localhost:9999/tts \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "你好，欢迎使用通义千问语音合成服务。",
+    "text": "Hallo, willkommen beim Qwen Sprachsynthese-Service.",
     "model": "qwen3-tts-flash-realtime",
     "voice": "Cherry"
   }' --output output.wav
 ```
 
-**示例请求 (cURL - 返回 URL)**:
+**Beispiel-Request (cURL - URL zurückgeben)**:
 
 ```bash
 curl -X POST http://localhost:9999/tts \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "你好，欢迎使用通义千问语音合成服务。",
+    "text": "Hallo, willkommen beim Qwen Sprachsynthese-Service.",
     "model": "qwen3-tts-flash-realtime",
     "return_url": true
   }'
 ```
 
-**示例返回 (JSON)**:
+**Beispiel-Antwort (JSON)**:
 ```json
 {
   "url": "http://localhost:9999/output/xxxx.wav"
 }
 ```
 
-### 2. 流式文本转语音 (SSE)
+### 2. Streaming Text-zu-Sprache (SSE)
 
-通过 SSE 协议实时获取音频片段。
+Echtzeit-Abruf von Audio-Fragmenten über das SSE-Protokoll.
 
 - **URL**: `/tts_stream`
-- **方法**: `POST`
+- **Methode**: `POST`
 - **Content-Type**: `application/json`
 
-**请求体**: 同上。
+**Request-Body**: Wie oben.
 
-**示例请求 (cURL)**:
+**Beispiel-Request (cURL)**:
 
 ```bash
 curl -X POST http://localhost:9999/tts_stream \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "你好，这是一个流式输出测试。",
+    "text": "Hallo, dies ist ein Streaming-Ausgabe-Test.",
     "model": "qwen3-tts-flash-realtime",
     "voice": "Cherry"
   }'
 ```
 
-**返回内容示例**:
+**Beispiel-Antwort**:
 
 ```text
 data: {"audio": "...", "is_end": false}
@@ -171,19 +171,19 @@ data: {"audio": "...", "is_end": false}
 ...
 data: {"is_end": true, "url": "...", "usage_characters": "12"}
 ```
-*注：`audio` 字段为 Base64 编码的 PCM (24000Hz, Mono, 16bit) 数据。如果开启了存储功能，最后一条消息会包含音频的 `url`。`usage_characters` 表示本次合成消耗的字符数。*
+*Hinweis: Das `audio`-Feld enthält Base64-kodierte PCM-Daten (24000Hz, Mono, 16bit). Wenn die Speicherfunktion aktiviert ist, enthält die letzte Nachricht die `url` der Audiodatei. `usage_characters` gibt die Anzahl der verbrauchten Zeichen für diese Synthese an.*
 
-### 3. 健康检查
+### 3. Gesundheitsprüfung
 
 - **URL**: `/health`
-- **方法**: `GET`
+- **Methode**: `GET`
 
-**返回**: `{"status": "ok"}`
+**Antwort**: `{"status": "ok"}`
 
-## 响应头信息
+## Response-Header
 
-在 `/tts` 接口返回时，会包含以下自定义响应头：
-- `X-Session-Id`: 本次合成的会话 ID。
-- `X-First-Audio-Delay`: 首包音频延迟（毫秒）。
-- `X-Usage-Characters`: 本次合成消耗的字符数。
-- `Content-Type`: `audio/wav` (返回二进制时) 或 `application/json` (返回 URL 时)。
+Bei der Antwort des `/tts`-Endpunkts werden folgende benutzerdefinierte Header mitgeliefert:
+- `X-Session-Id`: Session-ID dieser Synthese.
+- `X-First-Audio-Delay`: Latenz bis zum ersten Audio-Paket (Millisekunden).
+- `X-Usage-Characters`: Anzahl der verbrauchten Zeichen für diese Synthese.
+- `Content-Type`: `audio/wav` (bei Binärdaten-Rückgabe) oder `application/json` (bei URL-Rückgabe).
