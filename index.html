@@ -228,6 +228,16 @@
                 <div>Zeit: <span class="stat-value" id="timeElapsed">0.0s</span></div>
             </div>
             <div class="log" id="log"></div>
+            <div id="downloadSection" class="hidden" style="margin-top:16px;padding:16px;background:rgba(46,213,115,0.1);border-radius:12px;border:1px solid rgba(46,213,115,0.3)">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+                    <span style="color:#2ed573">✅ Audio gespeichert!</span>
+                    <div style="display:flex;gap:10px">
+                        <button id="downloadBtn" onclick="downloadAudio()" class="btn-success" style="padding:8px 16px;border-radius:8px;font-size:14px">⬇️ Download WAV</button>
+                        <button class="btn-secondary" onclick="playDownloadedAudio()" style="padding:8px 16px;font-size:14px">🔊 Anhören</button>
+                    </div>
+                </div>
+                <audio id="downloadedAudio" style="width:100%;margin-top:12px;display:none" controls></audio>
+            </div>
         </div>
     </div>
 
@@ -379,6 +389,16 @@
             <div id="vdStatus" style="margin-top:12px;display:none">
                 <span id="vdStatusText" style="color:#888">Wird abgespielt...</span>
             </div>
+            <div id="vdDownloadSection" class="hidden" style="margin-top:16px;padding:16px;background:rgba(46,213,115,0.1);border-radius:12px;border:1px solid rgba(46,213,115,0.3)">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+                    <span style="color:#2ed573">✅ Audio gespeichert!</span>
+                    <div style="display:flex;gap:10px">
+                        <button id="vdDownloadBtn" onclick="downloadVDAudio()" class="btn-success" style="padding:8px 16px;border-radius:8px;font-size:14px">⬇️ Download WAV</button>
+                        <button class="btn-secondary" onclick="playVDDownloadedAudio()" style="padding:8px 16px;font-size:14px">🔊 Anhören</button>
+                    </div>
+                </div>
+                <audio id="vdDownloadedAudio" style="width:100%;margin-top:12px;display:none" controls></audio>
+            </div>
         </div>
     </div>
 
@@ -394,6 +414,9 @@
         let currentCreatedVoice = null;
         let selectedCustomVoice = null;
         let selectedVoiceType = null; // 'vd' = Voice Design, 'vc' = Voice Cloning
+        let vdAbortController = null;
+        let vdIsPlaying = false;
+        let vdScheduledSources = [];
         
         const SAMPLE_RATE = 24000;
         
@@ -453,6 +476,7 @@
             
             chunkCount = 0; totalBytes = 0; startTime = Date.now(); scheduledTime = 0;
             document.getElementById('log').innerHTML = '';
+            hideDownloadSection();
             timerInterval = setInterval(updateStats, 100);
             
             if (!audioContext) audioContext = new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
@@ -508,7 +532,12 @@
                                     updateStats();
                                     playPCMChunk(pcm);
                                 }
-                                if (data.is_end) log('Stream beendet. '+data.usage_characters+' Zeichen','success');
+                                if (data.is_end) {
+                                    log('Stream beendet. '+(data.usage_characters||0)+' Zeichen','success');
+                                    if (data.url) {
+                                        showDownloadSection(data.url);
+                                    }
+                                }
                             } catch(e) {}
                         }
                     }
@@ -533,6 +562,89 @@
             animateBars(false);
             document.getElementById('playBtn').disabled = false;
             document.getElementById('stopBtn').disabled = true;
+        }
+        
+        let currentDownloadUrl = null;
+        let currentVDDownloadUrl = null;
+        
+        function showDownloadSection(url) {
+            const section = document.getElementById('downloadSection');
+            const audio = document.getElementById('downloadedAudio');
+            
+            currentDownloadUrl = url;
+            audio.src = url;
+            section.classList.remove('hidden');
+            log('Download verfügbar', 'success');
+        }
+        
+        async function downloadAudio() {
+            if (!currentDownloadUrl) return;
+            try {
+                const response = await fetch(currentDownloadUrl);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'tts_audio_' + Date.now() + '.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch(e) {
+                alert('Download fehlgeschlagen: ' + e.message);
+            }
+        }
+        
+        function playDownloadedAudio() {
+            const audio = document.getElementById('downloadedAudio');
+            audio.style.display = 'block';
+            audio.play();
+        }
+        
+        function hideDownloadSection() {
+            document.getElementById('downloadSection').classList.add('hidden');
+            document.getElementById('downloadedAudio').style.display = 'none';
+        }
+        
+        function showVDDownloadSection(url) {
+            const section = document.getElementById('vdDownloadSection');
+            const audio = document.getElementById('vdDownloadedAudio');
+            
+            currentVDDownloadUrl = url;
+            audio.src = url;
+            section.classList.remove('hidden');
+        }
+        
+        async function downloadVDAudio() {
+            if (!currentVDDownloadUrl) return;
+            try {
+                const response = await fetch(currentVDDownloadUrl);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'custom_voice_' + Date.now() + '.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch(e) {
+                alert('Download fehlgeschlagen: ' + e.message);
+            }
+        }
+        
+        function playVDDownloadedAudio() {
+            const audio = document.getElementById('vdDownloadedAudio');
+            audio.style.display = 'block';
+            audio.play();
+        }
+        
+        function hideVDDownloadSection() {
+            const section = document.getElementById('vdDownloadSection');
+            if (section) {
+                section.classList.add('hidden');
+                document.getElementById('vdDownloadedAudio').style.display = 'none';
+            }
         }
         
         function base64ToArrayBuffer(b64) {
@@ -792,36 +904,64 @@
             }
         }
         
+        function stopVDTTS() {
+            // Abort laufenden Request
+            if (vdAbortController) {
+                vdAbortController.abort();
+                vdAbortController = null;
+            }
+            // Stoppe alle geplanten Audio-Quellen
+            vdScheduledSources.forEach(src => {
+                try { src.stop(); } catch(e) {}
+            });
+            vdScheduledSources = [];
+            vdIsPlaying = false;
+        }
+        
         async function startVDTTS() {
+            // Stoppe vorherige Wiedergabe falls aktiv
+            stopVDTTS();
+            
+            // Prüfe ob Stimme ausgewählt
             if (!selectedCustomVoice) return alert('Keine Stimme ausgewählt!');
             const text = document.getElementById('vdText').value.trim();
             if (!text) return alert('Bitte Text eingeben!');
+            
+            // Hole aktuelle Werte (wichtig: bei jedem Klick neu lesen!)
+            const voiceToUse = selectedCustomVoice;
+            const typeToUse = selectedVoiceType;
             
             const btn = document.getElementById('vdPlayBtn');
             const statusEl = document.getElementById('vdStatus');
             const statusText = document.getElementById('vdStatusText');
             
-            btn.disabled = true;
+            btn.textContent = '⏹️ Stoppen';
+            btn.onclick = function() { stopVDTTS(); btn.textContent = '▶️ Abspielen'; btn.onclick = startVDTTS; statusText.textContent = 'Gestoppt'; };
             statusEl.style.display = 'block';
-            statusText.textContent = 'Verbinde...';
+            statusText.textContent = 'Verbinde mit ' + voiceToUse + '...';
+            hideVDDownloadSection();
             
             if (!audioContext) audioContext = new (window.AudioContext||window.webkitAudioContext)({sampleRate:SAMPLE_RATE});
             if (audioContext.state==='suspended') await audioContext.resume();
             scheduledTime = audioContext.currentTime;
             
+            vdAbortController = new AbortController();
+            vdIsPlaying = true;
+            
             // Wähle den richtigen Endpunkt basierend auf dem Stimmentyp
-            const endpoint = selectedVoiceType === 'vc' ? '/tts_vc_stream' : '/tts_vd_stream';
+            const endpoint = typeToUse === 'vc' ? '/tts_vc_stream' : '/tts_vd_stream';
             
             try {
-                statusText.textContent = 'Streaming (' + (selectedVoiceType === 'vc' ? 'Cloning' : 'Design') + ')...';
+                statusText.textContent = 'Streaming ' + voiceToUse + ' (' + (typeToUse === 'vc' ? 'Cloning' : 'Design') + ')...';
                 
                 const response = await fetch(API_BASE + endpoint, {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({
                         text: text,
-                        voice: selectedCustomVoice
-                    })
+                        voice: voiceToUse  // Verwende die lokale Variable!
+                    }),
+                    signal: vdAbortController.signal
                 });
                 
                 const reader = response.body.getReader();
@@ -829,7 +969,7 @@
                 let buffer = '';
                 let chunkNum = 0;
                 
-                while (true) {
+                while (vdIsPlaying) {
                     const {done, value} = await reader.read();
                     if (done) break;
                     
@@ -841,24 +981,55 @@
                         if (line.startsWith('data: ')) {
                             try {
                                 const data = JSON.parse(line.slice(6));
-                                if (data.audio) {
+                                if (data.audio && vdIsPlaying) {
                                     chunkNum++;
-                                    statusText.textContent = 'Chunk ' + chunkNum + ' empfangen...';
-                                    playPCMChunk(base64ToArrayBuffer(data.audio));
+                                    statusText.textContent = 'Chunk ' + chunkNum + ' (' + voiceToUse + ')';
+                                    playVDPCMChunk(base64ToArrayBuffer(data.audio));
                                 }
                                 if (data.is_end) {
                                     statusText.textContent = 'Fertig! (' + chunkNum + ' chunks)';
+                                    if (data.url) {
+                                        showVDDownloadSection(data.url);
+                                    }
                                 }
                             } catch(e) {}
                         }
                     }
                 }
             } catch(e) {
-                alert('Fehler: '+e.message);
-                statusText.textContent = 'Fehler: ' + e.message;
+                if (e.name !== 'AbortError') {
+                    statusText.textContent = 'Fehler: ' + e.message;
+                }
             } finally {
-                btn.disabled = false;
+                vdIsPlaying = false;
+                btn.textContent = '▶️ Abspielen';
+                btn.onclick = startVDTTS;
             }
+        }
+        
+        function playVDPCMChunk(pcm) {
+            const int16 = new Int16Array(pcm);
+            const float32 = new Float32Array(int16.length);
+            for (let i=0; i<int16.length; i++) float32[i] = int16[i]/32768.0;
+            
+            const buf = audioContext.createBuffer(1, float32.length, SAMPLE_RATE);
+            buf.getChannelData(0).set(float32);
+            
+            const src = audioContext.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioContext.destination);
+            
+            const now = audioContext.currentTime;
+            if (scheduledTime < now) scheduledTime = now;
+            src.start(scheduledTime);
+            scheduledTime += buf.duration;
+            
+            // Track source for stopping
+            vdScheduledSources.push(src);
+            src.onended = () => {
+                const idx = vdScheduledSources.indexOf(src);
+                if (idx > -1) vdScheduledSources.splice(idx, 1);
+            };
         }
         
         setStatus('idle','Bereit');
